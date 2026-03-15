@@ -66,7 +66,7 @@ def render_frame(enc, offset, coords_grid):
         root = unravel_fn(th)
         # Use the exact same encoding function as the rest of the model!
         encoded_spatial = fourier_encode(coord[1:], CONFIG["num_fourier_freqs"])
-        
+
         # Conditionally add time if configured
         if CONFIG.get("use_time_in_root", False):
             encoded_coord = jnp.concatenate([coord[:1], encoded_spatial], axis=-1)
@@ -151,7 +151,7 @@ if TRAIN:
             plot_videos(
                 np.expand_dims(recon, axis=1)[0], 
                 np.expand_dims(vis_batch, axis=1)[0], 
-                plot_ref=True, show_titles=True, save_name=run_dir / "plots" / f"recon_epoch{epoch+1}.png"
+                plot_ref=True, show_titles=True, save_name=run_dir / "plots" / f"p1_epoch{epoch+1}.png"
             )
 
     print("\nWall time:", time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
@@ -166,12 +166,16 @@ if TRAIN:
     ax.set_ylabel('Loss')
     ax.set_yscale('log')
     ax.set_title('Phase 1 Training Loss')
-    plt.savefig(run_dir / "plots" / "loss.png")
-    plt.show()
+    plt.draw()
+    plt.savefig(run_dir / "plots" / "p1_loss.png")
+
+else:
+    ## Print Warning
+    print("⚠️ TRAIN is set to False. Loading encoder and visualizing reconstructions only.")
+    encoder = eqx.tree_deserialise_leaves("vwarp_enc.eqx", encoder)
+    eqx.tree_serialise_leaves(run_dir / "vwarp_enc.eqx", encoder)
 
 #%% Visualise Reconstructions
-if not TRAIN:
-    encoder = eqx.tree_deserialise_leaves("vwarp_enc.eqx", encoder)
 
 print("\nVisualizing GT vs Reconstruction...")
 test_batch = next(iter(test_loader))[:5]

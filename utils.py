@@ -43,7 +43,8 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
 
         run_path = Path("./")
 
-    if train:
+    # if train:
+    if train and phase_name not in ["phase_2", "phase_3"]:
         timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
         run_path = Path(base_dir) / timestamp
         run_path.mkdir(parents=True, exist_ok=True)
@@ -54,26 +55,24 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
         with open(run_path / "config.yaml", 'w') as f:
             yaml.dump(config, f, default_flow_style=False)
 
+        # 1. Handle current_script but ignore ipykernel_launcher
+        current_script = Path(sys.argv[0])
+        files_to_copy = [
+            "utils.py", "loaders.py", "models.py", "phase1.py",
+            "phase2.py", "phase3.py"
+        ]
 
-    # 1. Handle current_script but ignore ipykernel_launcher
-    current_script = Path(sys.argv[0])
-    files_to_copy = [
-        "utils.py", "loaders.py", "models.py", 
-        "phase_1.py", "phase1.py", # Added both variations just in case
-        "phase2.py", "phase3.py"
-    ]
-    
-    if current_script.exists() and current_script.is_file() and "ipykernel_launcher" not in current_script.name:
-        files_to_copy.append(current_script.name)
+        # if current_script.exists() and current_script.is_file() and "ipykernel_launcher" not in current_script.name:
+        #     files_to_copy.append(current_script.name)
 
-    # 2. Copy the files and use a set() to avoid trying to copy the same file twice
-    for fname in set(files_to_copy):
-        src_file = Path(fname)
-        if src_file.exists() and src_file.is_file():
-            shutil.copy(src_file, run_path / src_file.name)
-        elif fname in ["phase_1.py", "phase1.py"]:
-            # Optional: Print a warning so you know exactly why it's failing if it still doesn't copy
-            pass 
+        # 2. Copy the files and use a set() to avoid trying to copy the same file twice
+        for fname in set(files_to_copy):
+            src_file = Path(fname)
+            if src_file.exists() and src_file.is_file():
+                shutil.copy(src_file, run_path / src_file.name)
+            elif fname in ["phase_1.py", "phase1.py"]:
+                # Optional: Print a warning so you know exactly why it's failing if it still doesn't copy
+                pass 
 
     return run_path
 
@@ -207,11 +206,25 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             else:
                 axes[0, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
 
+        # # plt.draw(flush=True)
+
+        # ## Plot imediately, then close after saving to ensure memory is freed for next plot
+        # plt.draw()
+
         if save_name:
             plt.savefig(save_name, dpi=100, bbox_inches='tight', facecolor='white', transparent=False)
         else:
+            plt.draw()
+
+        # 2. Force immediate display of the figure
+        try:
+            from IPython.display import display
+            display(fig)
+        except ImportError:
             plt.show()
-        plt.close()
+            
+        # 3. Close the figure to free up memory and prevent double-plotting
+        plt.close(fig)
 
         if save_video and save_name is not None:
             try:

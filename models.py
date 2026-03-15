@@ -115,7 +115,7 @@ class VanillaRNNCell(eqx.Module):
     def __call__(self, input: jax.Array, hidden: jax.Array) -> jax.Array:
         return jax.nn.tanh(self.weight_ih(input) + self.weight_hh(hidden))
 
-class GenerativeControlModule(eqx.Module):
+class RNNController(eqx.Module):
     d_model: int
     rnn_type: str = eqx.field(static=True)
     lam_dim: int = eqx.field(static=True)
@@ -148,20 +148,149 @@ class GenerativeControlModule(eqx.Module):
             width_size=self.d_model * 1, depth=1, key=k2
         )
 
-    def reset_gcm(self, T):
+    def reset(self, T):
         if self.rnn_type == "LSTM":
             return (jnp.zeros((self.d_model,)), jnp.zeros((self.d_model,)))
         else:
             return jnp.zeros((self.d_model,))
 
-    def encode_gcm(self, state, step_idx, z, a):
+    def encode(self, state, step_idx, z, a):
         rnn_input = jnp.concatenate([z, a], axis=-1)
         return self.rnn_cell(rnn_input, state)
 
-    def decode_gcm(self, state, step_idx, z_current):
+    def decode(self, state, step_idx, z_current):
         h = state[0] if self.rnn_type == "LSTM" else state
         decode_input = jnp.concatenate([h, z_current], axis=-1)
         return self.action_decoder(decode_input)
+
+
+class TransformerBlock(eqx.Module):
+    attn: eqx.nn.MultiheadAttention
+    mlp: eqx.nn.MLP
+    ln1: eqx.nn.LayerNorm
+    ln2: eqx.nn.LayerNorm
+
+    def __init__(self, d_model, num_heads, key):
+        k1, k2 = jax.random.split(key)
+        self.attn = eqx.nn.MultiheadAttention(
+            num_heads=num_heads,
+            query_size=d_model,
+            use_query_bias=True,
+            use_key_bias=True,
+            use_value_bias=True,
+            use_output_bias=True,
+            key=k1
+        )
+        self.mlp = eqx.nn.MLP(d_model, d_model, width_size=d_model * 4, depth=1, key=k2)
+        self.ln1 = eqx.nn.LayerNorm(d_model)
+        self.ln2 = eqx.nn.LayerNorm(d_model)
+
+    def __call__(self, x, mask):
+        x_norm = jax.vmap(self.ln1)(x)
+        attn_out = self.attn(x_norm, x_norm, x_norm, mask=mask)
+        x = x + attn_out
+        x = x + jax.vmap(self.mlp)(jax.vmap(self.ln2)(x))
+        return x
+
+class TransformerController(eqx.Module):
+    """
+    Autoregressive Transformer Module for Latent Actions (GCM).
+    """
+    d_model: int
+    max_len: int
+    pos_emb: jax.Array
+    blocks: tuple
+    proj_in: eqx.nn.Linear
+    
+    lam_dim: int = eqx.field(static=True)
+    icl_decoding: bool = eqx.field(static=True)
+    
+    action_mlp: Optional[eqx.nn.MLP]
+    output_proj: Optional[eqx.nn.Linear]
+
+    def __init__(self, lam_dim, mem_dim, latent_dim, key, max_len=20, num_heads=4, num_blocks=4, num_actions=4):
+        self.max_len = max_len
+        self.icl_decoding = True
+        self.lam_dim = lam_dim
+        self.d_model = mem_dim
+        
+        k1, k2, k3, k4, k5, k6 = jax.random.split(key, 6)
+        
+        self.proj_in = eqx.nn.Linear(latent_dim + lam_dim, self.d_model, key=k1)
+        self.pos_emb = jax.random.normal(k2, (max_len, self.d_model)) * 0.02
+        
+        block_keys = jax.random.split(k3, num_blocks)
+        self.blocks = tuple(TransformerBlock(self.d_model, num_heads, bk) for bk in block_keys)
+
+        if self.icl_decoding:
+            self.action_mlp = None
+            if num_actions:
+                self.output_proj = eqx.nn.Linear(self.d_model, num_actions, key=k6)
+            else:
+                self.output_proj = eqx.nn.Linear(self.d_model, lam_dim, key=k6)
+        else:
+            self.action_mlp = eqx.nn.MLP(self.d_model + latent_dim, lam_dim, width_size=self.d_model * 2, depth=3, key=k4)
+            self.output_proj = None
+
+    def reset(self, T):
+        return jnp.zeros((T, self.d_model))
+
+    def encode(self, buffer, step_idx, z, a):
+        token = self.proj_in(jnp.concatenate([z, a], axis=-1))
+        return buffer.at[step_idx - 1].set(token)
+
+    def decode(self, buffer, step_idx, z_current):
+        T = buffer.shape[0]
+        if self.icl_decoding:
+            zero_action = jnp.zeros((self.lam_dim,), dtype=z_current.dtype)
+            query_token = self.proj_in(jnp.concatenate([z_current, zero_action], axis=-1))
+            temp_buffer = buffer.at[step_idx - 1].set(query_token)
+            
+            x = temp_buffer + self.pos_emb[:T]
+            mask = jnp.tril(jnp.ones((T, T), dtype=bool))
+            
+            for block in self.blocks:
+                x = block(x, mask)
+            context = x[step_idx - 1]
+            return self.output_proj(context)
+        else:
+            def compute_context():
+                x = buffer + self.pos_emb[:T]
+                mask = jnp.tril(jnp.ones((T, T), dtype=bool))
+                for block in self.blocks:
+                    x = block(x, mask)
+                return x[step_idx - 2]
+                
+            context = jax.lax.cond(step_idx > 1, compute_context, lambda: jnp.zeros(self.d_model))
+            return self.action_mlp(jnp.concatenate([context, z_current], axis=-1))
+
+
+class GenerativeControlModule(eqx.Module):
+    d_model: int
+    gcm_type: str = eqx.field(static=True)
+    lam_dim: int = eqx.field(static=True)
+
+    seq_model: eqx.Module
+
+    def __init__(self, lam_dim, mem_dim, latent_dim, key, gcm_type="GRU", **kwargs):
+        self.lam_dim = lam_dim
+        self.d_model = mem_dim
+        self.gcm_type = gcm_type.upper()
+
+        if self.gcm_type in ["LSTM", "GRU", "RNN"]:
+            self.seq_model = RNNController(lam_dim, mem_dim, latent_dim, key=key, rnn_type=gcm_type)
+        elif self.gcm_type == "TRANSFORMER":
+            self.seq_model = TransformerController(lam_dim, mem_dim, latent_dim, key=key, **kwargs)
+        else:
+            raise ValueError("Unsupported gcm_type. Must be 'LSTM', 'GRU', 'RNN', or 'TRANSFORMER'.")
+
+    def decode_gcm(self, buffer, step_idx, z_current):
+        return self.seq_model.decode(buffer, step_idx, z_current)
+    def encode_gcm(self, buffer, step_idx, z_current, a):
+        return self.seq_model.encode(buffer, step_idx, z_current, a)
+    def reset_gcm(self, T):
+        return self.seq_model.reset(T)
+
 
 class LatentActionModule(eqx.Module):
     """ Latent Action Model holding both IDM and GCM. """

@@ -127,6 +127,15 @@ def train_step(diff_m, static_m, opt_state, ref_videos):
     diff_m = eqx.apply_updates(diff_m, updates)
     return diff_m, opt_state, loss_val
 
+@eqx.filter_jit
+def eval_step(m, ref_videos, context_ratio=0.0):
+    # batched_fn = jax.vmap(phase3_forward, in_axes=(None, 0))
+    # a_preds, a_targets = batched_fn(m, ref_videos)
+    # return a_preds, a_targets
+
+    _, _, pred_videos = m(ref_videos, coords_grid, context_ratio)
+    return pred_videos
+
 #%% Training Loop
 if TRAIN:
     print(f"\n🚀 Starting Phase 3: GCM Action Matching -> Saving to {run_dir}")
@@ -146,12 +155,35 @@ if TRAIN:
         if (epoch+1) % CONFIG["phase_3"]["print_every"] == 0:
             print(f"Phase 3 - Epoch {epoch+1}/{CONFIG["phase_3"]['nb_epochs']} - Avg Loss: {np.mean(epoch_losses):.6f}", f"- LR Scale: {lr_scale:.4f}")
 
+        ## Plot video every 10ths of epochs
+        if (epoch+1) % max(1, CONFIG["phase_3"]["nb_epochs"] // 10) == 0:
+            pred_videos = eval_step(eqx.combine(diff_model, static_model), sample_batch, context_ratio=0.0)
+            plot_videos(
+                video=pred_videos[0], 
+                ref_video=sample_batch[0], 
+                plot_ref=True, 
+                show_titles=True,
+                save_name=run_dir / "plots" / f"p3_epoch{epoch+1}.png",
+                save_video=True)
+
     print("\nPhase 3 Wall time:", time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
-    
+
     final_model = eqx.combine(diff_model, static_model)
     eqx.tree_serialise_leaves(run_dir / "vwarp_phase3.eqx", final_model)
     eqx.tree_serialise_leaves("vwarp_phase3.eqx", final_model)
     print("✅ Saved Phase 3 Model")
+
+    ## Plot and save loss curve as p3_loss.png
+    plt.figure(figsize=(8, 5))
+    plt.plot(epoch_losses, label="Phase 3 Loss")
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.title('Phase 3 Training Loss')
+    plt.yscale('log')
+    plt.legend()
+    plt.draw()
+    plt.savefig(run_dir / "plots" / "p3_loss.png")
+
 else:
     final_model = model
 
@@ -159,7 +191,8 @@ else:
 print("\n Generative Evaluation Rollout (context_ratio=0.0)...")
 sample_vis = next(iter(test_loader))[:3]
 
-_, _, pred_videos = final_model(sample_vis, coords_grid, context_ratio=0.0)
+# _, _, pred_videos = final_model(sample_vis, coords_grid, context_ratio=0.0)
+_, _, pred_videos = eval_step(final_model, sample_vis, context_ratio=0.0)
 
 for i in range(pred_videos.shape[0]):
     plot_videos(

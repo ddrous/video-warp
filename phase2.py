@@ -197,7 +197,7 @@ if TRAIN:
                 video=pred_videos[0], 
                 ref_video=sample_batch[0], 
                 plot_ref=True, 
-                save_name=run_dir / "plots" / f"epoch{epoch+1}_recons.png"
+                save_name=run_dir / "plots" / f"p2_epoch{epoch+1}.png"
             )
 
     print("\nPhase 2 Wall time:", time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
@@ -207,6 +207,18 @@ if TRAIN:
     eqx.tree_serialise_leaves(run_dir / "vwarp_phase2.eqx", model)
     eqx.tree_serialise_leaves("vwarp_phase2.eqx", model)
     print("✅ Saved Phase 2 Model")
+
+    ## Plot and save the loss as p2_loss.png
+    plt.figure(figsize=(8, 5))
+    plt.plot(epoch_losses, label="Phase 2 Loss")
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.yscale('log')
+    plt.title('Phase 2 Training Loss')
+    plt.legend()
+    plt.draw()
+    plt.savefig(run_dir / "plots" / "p2_loss.png")
+
 else:
     # Just in case TRAIN is false, make sure model is unified
     model = eqx.combine(diff_model, static_model)
