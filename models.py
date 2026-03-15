@@ -1,0 +1,325 @@
+import jax
+import jax.numpy as jnp
+import equinox as eqx
+from typing import Optional
+from jax.flatten_util import ravel_pytree
+
+def fourier_encode(x, num_freqs):
+    freqs = 2.0 ** jnp.arange(num_freqs)
+    angles = x[..., None] * freqs[None, None, :] * jnp.pi
+    angles = angles.reshape(*x.shape[:-1], -1)
+    return jnp.concatenate([x, jnp.sin(angles), jnp.cos(angles)], axis=-1)
+
+def get_activation(name):
+    if name == 'sin': return jnp.sin
+    if name == 'gelu': return jax.nn.gelu
+    return jax.nn.relu
+
+class RootMLP(eqx.Module):
+    layers: list
+    activation: callable = eqx.field(static=True)  # <-- Add this!
+
+    def __init__(self, in_size, out_size, width, depth, activation_name, key):
+        self.activation = get_activation(activation_name)
+        keys = jax.random.split(key, depth + 1)
+        self.layers = [eqx.nn.Linear(in_size, width, key=keys[0])]
+        for i in range(depth - 1):
+            self.layers.append(eqx.nn.Linear(width, width, key=keys[i+1]))
+        self.layers.append(eqx.nn.Linear(width, out_size, key=keys[-1]))
+
+    def __call__(self, x):
+        for layer in self.layers[:-1]:
+            x = self.activation(layer(x))
+        return self.layers[-1](x)
+
+class WeightCNN(eqx.Module):
+    layers: list
+    theta_base: jax.Array
+
+    def __init__(self, in_channels, out_dim, spatial_shape, theta_base, key, hidden_width=32, depth=4):
+        self.theta_base = theta_base
+        H, W = spatial_shape
+        keys = jax.random.split(key, depth + 1)
+        
+        conv_layers = []
+        current_in = in_channels
+        current_out = hidden_width
+        
+        for i in range(depth):
+            conv_layers.append(
+                eqx.nn.Conv2d(current_in, current_out, kernel_size=3, stride=2, padding=1, key=keys[i])
+            )
+            current_in = current_out
+            current_out *= 2
+            
+        dummy_x = jnp.zeros((in_channels, H, W))
+        for layer in conv_layers:
+            dummy_x = layer(dummy_x)
+
+        flat_dim = dummy_x.reshape(-1).shape[0]
+        self.layers = conv_layers + [eqx.nn.Linear(flat_dim, out_dim, key=keys[depth])]
+        
+    def __call__(self, x):
+        for layer in self.layers[:-1]:
+            x = jax.nn.relu(layer(x))
+        x = x.reshape(-1)
+        offset = self.layers[-1](x)
+        return offset
+
+class ForwardDynamicsModule(eqx.Module):
+    mlp_A: Optional[eqx.nn.MLP]
+    mlp_B: Optional[eqx.nn.MLP]
+    giant_mlp: Optional[eqx.nn.MLP]
+    split_forward: bool = eqx.field(static=True)
+
+    def __init__(self, dyn_dim, lam_dim, split_forward, key):
+        self.split_forward = split_forward
+        k1, k2, k3 = jax.random.split(key, 3)
+        
+        # Hardcoded FDM dimensions as requested
+        fdm_depth = 3
+        fdm_width = dyn_dim * 2
+        
+        if split_forward:
+            self.mlp_A = eqx.nn.MLP(dyn_dim, dyn_dim, width_size=fdm_width, depth=fdm_depth, key=k1)
+            self.mlp_B = eqx.nn.MLP(lam_dim, dyn_dim, width_size=fdm_width, depth=fdm_depth, key=k2)
+            self.giant_mlp = None
+        else:
+            self.mlp_A = None
+            self.mlp_B = None
+            self.giant_mlp = eqx.nn.MLP(dyn_dim + lam_dim, dyn_dim, width_size=fdm_width, depth=fdm_depth, key=k3)
+
+    def __call__(self, z_prev, a):
+        if self.split_forward:
+            return self.mlp_A(z_prev) + self.mlp_B(a)
+        else:
+            return self.giant_mlp(jnp.concatenate([z_prev, a], axis=-1))
+
+class InverseDynamicsModule(eqx.Module):
+    mlp: eqx.nn.MLP
+    def __init__(self, dyn_dim, lam_dim, key):
+        self.mlp = eqx.nn.MLP(dyn_dim * 2, lam_dim, width_size=dyn_dim*1, depth=3, key=key)
+        
+    def __call__(self, z_prev, z_target):
+        return self.mlp(jnp.concatenate([z_prev, z_target], axis=-1))
+
+class VanillaRNNCell(eqx.Module):
+    weight_ih: eqx.nn.Linear
+    weight_hh: eqx.nn.Linear
+
+    def __init__(self, input_size: int, hidden_size: int, key: jax.random.PRNGKey):
+        k1, k2 = jax.random.split(key)
+        self.weight_ih = eqx.nn.Linear(input_size, hidden_size, use_bias=True, key=k1)
+        self.weight_hh = eqx.nn.Linear(hidden_size, hidden_size, use_bias=False, key=k2)
+
+    def __call__(self, input: jax.Array, hidden: jax.Array) -> jax.Array:
+        return jax.nn.tanh(self.weight_ih(input) + self.weight_hh(hidden))
+
+class GenerativeControlModule(eqx.Module):
+    d_model: int
+    rnn_type: str = eqx.field(static=True)
+    lam_dim: int = eqx.field(static=True)
+    
+    rnn_cell: eqx.Module
+    action_decoder: eqx.nn.MLP
+
+    def __init__(self, lam_dim, mem_dim, latent_dim, key, rnn_type="GRU", **kwargs):
+        self.lam_dim = lam_dim
+        self.d_model = mem_dim
+        self.rnn_type = rnn_type.upper()
+        
+        k1, k2 = jax.random.split(key, 2)
+        
+        input_dim = latent_dim + lam_dim
+        if self.rnn_type == "LSTM":
+            self.rnn_cell = eqx.nn.LSTMCell(input_dim, self.d_model, key=k1)
+        elif self.rnn_type == "GRU":
+            self.rnn_cell = eqx.nn.GRUCell(input_dim, self.d_model, key=k1)
+        elif self.rnn_type == "RNN":
+            self.rnn_cell = VanillaRNNCell(input_dim, self.d_model, key=k1)
+        else:
+            raise ValueError("Unsupported rnn_type. Must be 'LSTM', 'GRU', or 'RNN'.")
+
+        decode_input_dim = self.d_model + latent_dim
+        out_dim = lam_dim
+        
+        self.action_decoder = eqx.nn.MLP(
+            in_size=decode_input_dim, out_size=out_dim, 
+            width_size=self.d_model * 1, depth=1, key=k2
+        )
+
+    def reset_gcm(self, T):
+        if self.rnn_type == "LSTM":
+            return (jnp.zeros((self.d_model,)), jnp.zeros((self.d_model,)))
+        else:
+            return jnp.zeros((self.d_model,))
+
+    def encode_gcm(self, state, step_idx, z, a):
+        rnn_input = jnp.concatenate([z, a], axis=-1)
+        return self.rnn_cell(rnn_input, state)
+
+    def decode_gcm(self, state, step_idx, z_current):
+        h = state[0] if self.rnn_type == "LSTM" else state
+        decode_input = jnp.concatenate([h, z_current], axis=-1)
+        return self.action_decoder(decode_input)
+
+class LatentActionModule(eqx.Module):
+    """ Latent Action Model holding both IDM and GCM. """
+    idm: InverseDynamicsModule
+    gcm: Optional[eqx.Module]
+    discrete_actions: bool = eqx.field(static=True)
+    action_embeddings: Optional[eqx.nn.Embedding]
+
+    def __init__(self, dyn_dim, lam_dim, mem_dim, num_actions, init_gcm, key):
+        k1, k2 = jax.random.split(key)
+        self.discrete_actions = num_actions is not None
+        self.idm = InverseDynamicsModule(dyn_dim, lam_dim, key=k1)
+        
+        if init_gcm:
+            self.gcm = GenerativeControlModule(lam_dim, mem_dim, dyn_dim, key=k2, rnn_type="GRU")
+        else:
+            self.gcm = None
+
+        if self.discrete_actions:
+            emb_weights = jnp.zeros((num_actions, lam_dim))
+            self.action_embeddings = eqx.nn.Embedding(weight=emb_weights, key=k2)
+        else:
+            self.action_embeddings = None
+
+    def quantise_action(self, raw_action):
+        dists = jnp.sum((raw_action - self.action_embeddings.weight) ** 2, axis=-1)
+        closest_idx = jnp.argmin(dists)
+        return raw_action, self.action_embeddings(closest_idx)
+
+    def inverse_dynamics(self, z_prev, z_target):
+        raw_action = self.idm(z_prev, z_target)
+        if not self.discrete_actions:
+            return raw_action, raw_action
+        return self.quantise_action(raw_action)
+
+    def decode_gcm(self, buffer, step_idx, z_current):
+        raw_action = self.gcm.decode_gcm(buffer, step_idx, z_current)
+        if not self.discrete_actions:
+            return raw_action, raw_action
+        return self.quantise_action(raw_action)
+
+    def encode_gcm(self, buffer, step_idx, z_current, a):
+        return self.gcm.encode_gcm(buffer, step_idx, z_current, a)
+    
+    def reset_gcm(self, T):
+        return self.gcm.reset_gcm(T)
+
+class VWARP(eqx.Module):
+    encoder: WeightCNN
+    transition_model: ForwardDynamicsModule
+    action_model: LatentActionModule
+
+    unravel_fn: callable = eqx.field(static=True)
+    d_theta: int = eqx.field(static=True)
+    lam_dim: int = eqx.field(static=True)
+    frame_shape: tuple = eqx.field(static=True)
+    split_forward: bool = eqx.field(static=True)
+    num_freqs: int = eqx.field(static=True)
+    mem_dim: int = eqx.field(static=True)
+    use_action_residuals: bool = eqx.field(static=True)
+
+    use_time_in_root: bool = eqx.field(static=True)
+
+    def __init__(self, config, frame_shape, key, init_gcm=True):
+        k_root, k_enc, k_lam, k_fwd = jax.random.split(key, 4)
+        
+        self.frame_shape = frame_shape
+        self.num_freqs = config["num_fourier_freqs"]
+        self.lam_dim = config["lam_space"]
+        self.split_forward = config["split_forward"]
+        self.mem_dim = config["mem_space"]
+        self.use_action_residuals = config.get("use_action_residuals", False)
+        self.use_time_in_root = config.get("use_time_in_root", False)
+
+        H, W, C = frame_shape
+        coord_dim = 2 + 2 * 2 * self.num_freqs 
+        add_time = 1 if config.get("use_time_in_root", False) else 0
+        
+        activation_name = config.get("root_activation", "relu")
+        template_root = RootMLP(coord_dim+add_time, C, config["root_width"], config["root_depth"], activation_name, k_root)
+        
+        flat_params, self.unravel_fn = ravel_pytree(template_root)
+        self.d_theta = flat_params.shape[0]
+
+        self.encoder = WeightCNN(
+            in_channels=C, out_dim=self.d_theta, spatial_shape=(H, W), 
+            theta_base=flat_params, key=k_enc, 
+            hidden_width=config["cnn_hidden_width"], depth=config["cnn_depth"]
+        )
+
+        self.transition_model = ForwardDynamicsModule(self.d_theta, self.lam_dim, self.split_forward, key=k_fwd)
+
+        num_actions = config["num_actions"] if config["discrete_actions"] else None
+        self.action_model = LatentActionModule(
+            self.d_theta, self.lam_dim, self.mem_dim, 
+            num_actions=num_actions, init_gcm=init_gcm, key=k_lam
+        )
+
+    def render_pixels(self, theta, coords):
+        def render_pt(th, coord):
+            root = self.unravel_fn(th)
+            encoded_spatial = fourier_encode(coord[1:], self.num_freqs)
+            
+            if self.use_time_in_root:
+                encoded_coord = jnp.concatenate([coord[:1], encoded_spatial], axis=-1)
+            else:
+                encoded_coord = encoded_spatial
+                
+            return root(encoded_coord)
+        return jax.vmap(render_pt, in_axes=(None, 0))(theta, coords)
+
+    def render_frame(self, theta_offset, coords_grid):
+        H, W, C = self.frame_shape
+        flat_coords = coords_grid.reshape(-1, 3)
+        theta = theta_offset + self.encoder.theta_base
+
+        pred_flat = self.render_pixels(theta, flat_coords)
+        return pred_flat.reshape(H, W, -1)
+
+    def inference_rollout(self, ref_video, coords_grid, context_ratio=0.0):
+        T = ref_video.shape[0]
+        init_frame = ref_video[0]
+        
+        z_init = self.encoder(jnp.transpose(init_frame, (2, 0, 1)))
+        m_init = self.action_model.reset_gcm(T)
+        a_init = jnp.zeros((self.lam_dim,))
+
+        @eqx.filter_checkpoint
+        def scan_step(carry, scan_inputs):
+            z_t, m_t, a_tm1 = carry
+            o_tp1, step_idx = scan_inputs
+
+            time_coord = jnp.array([(step_idx-1)/(T-1)], dtype=z_t.dtype)
+            coords_grid_t = jnp.concatenate([jnp.full_like(coords_grid[..., :1], time_coord), coords_grid], axis=-1)
+            pred_out = self.render_frame(z_t, coords_grid_t)
+
+            is_context = (step_idx / T) <= context_ratio
+
+            a_t_raw, a_t = jax.lax.cond(
+                is_context,
+                lambda: self.action_model.inverse_dynamics(z_t, self.encoder(jnp.transpose(o_tp1, (2, 0, 1)))),
+                lambda: self.action_model.decode_gcm(m_t, step_idx, z_t)
+            )
+
+            if self.use_action_residuals:
+                a_t_raw = a_t_raw + a_tm1
+                a_t = a_t + a_tm1
+
+            m_tp1 = self.action_model.encode_gcm(m_t, step_idx, z_t, a_t)
+            z_tp1 = self.transition_model(z_t, a_t)
+
+            return (z_tp1, m_tp1, a_t), ((a_t_raw, a_t), z_t, pred_out)
+
+        scan_inputs = (jnp.concatenate([ref_video[1:], jnp.zeros_like(ref_video[:1])], axis=0), jnp.arange(1, T+1))
+        _, (actions, pred_latents, pred_video) = jax.lax.scan(scan_step, (z_init, m_init, a_init), scan_inputs)
+        
+        return actions, pred_latents, pred_video
+
+    def __call__(self, ref_videos, coords_grid, context_ratio=0.0):
+        batched_fn = jax.vmap(self.inference_rollout, in_axes=(0, None, None))
+        return batched_fn(ref_videos, coords_grid, context_ratio)
