@@ -142,7 +142,7 @@ if TRAIN:
 
         avg_loss = np.mean(epoch_losses)
         if (epoch+1) % (CONFIG["phase_1"]["print_every"]) == 0:
-            print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f}")
+            print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f}", flush=True)
 
         ## Visualize reconstructions every nb_epocsh/10 epochs
         if (epoch+1) % (CONFIG["phase_1"]["nb_epochs"] // 10) == 0:
@@ -188,3 +188,7 @@ plot_videos(
     np.expand_dims(test_batch, axis=1)[test_id], 
     plot_ref=True, show_titles=False, save_name=run_dir / "plots" / "phase1_recons.png"
 )
+
+
+# %% Copy nohup.log to run_dir for record keeping
+sys.shutil.copy("nohup.log", run_dir / "nohup_p1.log")

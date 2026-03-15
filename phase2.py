@@ -186,7 +186,7 @@ if TRAIN:
             lr_scales.append(lr_scale)
 
         if (epoch+1) % CONFIG["phase_2"]["print_every"] == 0:
-            print(f"Phase 2 - Epoch {epoch+1}/{CONFIG['phase_2']['nb_epochs']} - Avg Loss: {np.mean(epoch_losses):.6f} - LR Scale: {np.mean(lr_scales):.4f}")
+            print(f"Phase 2 - Epoch {epoch+1}/{CONFIG['phase_2']['nb_epochs']} - Avg Loss: {np.mean(epoch_losses):.6f} - LR Scale: {np.mean(lr_scales):.4f}", flush=True)
 
         ## Visualise reconstructions every nb_epochs/10 epochs
         if (epoch+1) % max(1, (CONFIG["phase_2"]["nb_epochs"] // 10)) == 0:
@@ -250,3 +250,7 @@ if CONFIG["discrete_actions"]:
     plt.tight_layout()
     plt.savefig(run_dir / "plots" / "p2_action_heatmap.png")
     plt.show()
+
+
+# %% Copy nohup.log to run_dir for record keeping
+sys.shutil.copy("nohup.log", run_dir / "nohup_p2.log")

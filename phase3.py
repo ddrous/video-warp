@@ -153,7 +153,7 @@ if TRAIN:
             lr_scales.append(lr_scale)
 
         if (epoch+1) % CONFIG["phase_3"]["print_every"] == 0:
-            print(f"Phase 3 - Epoch {epoch+1}/{CONFIG["phase_3"]['nb_epochs']} - Avg Loss: {np.mean(epoch_losses):.6f}", f"- LR Scale: {lr_scale:.4f}")
+            print(f"Phase 3 - Epoch {epoch+1}/{CONFIG["phase_3"]['nb_epochs']} - Avg Loss: {np.mean(epoch_losses):.6f}", f"- LR Scale: {lr_scale:.4f}", flush=True)
 
         ## Plot video every 10ths of epochs
         if (epoch+1) % max(1, CONFIG["phase_3"]["nb_epochs"] // 10) == 0:
@@ -203,3 +203,8 @@ for i in range(pred_videos.shape[0]):
         save_name=run_dir / "plots" / f"p3_autoreg_vis_{i}.png",
         save_video=True
     )
+
+
+
+# %% Copy nohup.log to run_dir for record keeping
+sys.shutil.copy("nohup.log", run_dir / "nohup_p3.log")
