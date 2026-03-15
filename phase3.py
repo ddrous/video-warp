@@ -9,9 +9,10 @@ import yaml
 import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
+import shutil
 
 from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params
-from loaders import get_dataloaders
+from loaders import get_dataloaders, torch
 from models import VWARP
 
 try:
@@ -22,6 +23,10 @@ except Exception as e:
 
 TRAIN = True
 DEBUG = CONFIG.get("debug", False)
+
+key = jax.random.PRNGKey(CONFIG["seed"])
+torch.manual_seed(CONFIG["seed"])
+np.random.seed(CONFIG["seed"])
 
 #%% Phase 3 Forward Definition
 def phase3_forward(model, ref_video):
@@ -77,6 +82,13 @@ coords_grid = get_coords_grid(H, W)
 
 key, subkey = jax.random.split(key)
 model = VWARP(CONFIG, frame_shape=(H, W, C), key=subkey, init_gcm=True)
+## Print parameter counts (in each submodule)
+print(f"Total model parameters: {count_trainable_params(model)}")
+print(f"    - Encoder parameters: {count_trainable_params(model.encoder)}")
+print(f"    - Transition Model parameters: {count_trainable_params(model.transition_model)}")
+print(f"    - Inverse Dynamics Model: {count_trainable_params(model.action_model.idm)}")
+print(f"    - GCM parameters: {count_trainable_params(model.action_model.gcm)}")
+
 
 try:
     dummy = VWARP(CONFIG, frame_shape=(H, W, C), key=subkey, init_gcm=False)
@@ -207,4 +219,4 @@ for i in range(pred_videos.shape[0]):
 
 
 # %% Copy nohup.log to run_dir for record keeping
-sys.shutil.copy("nohup.log", run_dir / "nohup_p3.log")
+shutil.copy("nohup.log", run_dir / "nohup_p3.log")

@@ -8,9 +8,10 @@ import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
+import shutil
 
-from utils import setup_run_dir, get_coords_grid, ssim, plot_videos
-from loaders import get_dataloaders
+from utils import setup_run_dir, get_coords_grid, ssim, plot_videos, count_trainable_params
+from loaders import get_dataloaders, torch
 from models import WeightCNN, RootMLP, fourier_encode
 from jax.flatten_util import ravel_pytree
 
@@ -29,8 +30,11 @@ except Exception as e:
 TRAIN = True
 DEBUG = CONFIG.get("debug", False)
 
-#%% Initialization
 key = jax.random.PRNGKey(CONFIG["seed"])
+torch.manual_seed(CONFIG["seed"])
+np.random.seed(CONFIG["seed"])
+
+#%% Initialization
 run_dir = setup_run_dir("phase_1", CONFIG, train=TRAIN)
 
 train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_1")
@@ -57,6 +61,11 @@ encoder = WeightCNN(
     theta_base=flat_params, key=k_enc, 
     hidden_width=CONFIG["cnn_hidden_width"], depth=CONFIG["cnn_depth"]
 )
+
+## Print parameter counts (in the layers, and in the theta base)
+print(f"Total encoder parameters: {count_trainable_params(encoder)}")
+print(f"    - of which theta_base has {flat_params.shape[0]} parameters")
+print(f"    - and the rest of the CNN has {count_trainable_params(encoder) - flat_params.shape[0]} parameters")
 
 def render_frame(enc, offset, coords_grid):
     flat_coords = coords_grid.reshape(-1, 3)
@@ -129,7 +138,7 @@ def eval_step(enc, batch_frames, coords_grid):
 #%% Training Loop
 
 if TRAIN:
-    print(f"\n🚀 Starting Phase 1: Autoencoder Pretraining -> Saving to {run_dir}")
+    print(f"\n🚀 Starting Phase 1: Encoder Pretraining -> Saving to {run_dir}")
     start_time = time.time()
     epoch_losses_all = []
 
@@ -191,4 +200,4 @@ plot_videos(
 
 
 # %% Copy nohup.log to run_dir for record keeping
-sys.shutil.copy("nohup.log", run_dir / "nohup_p1.log")
+shutil.copy("nohup.log", run_dir / "nohup_p1.log")

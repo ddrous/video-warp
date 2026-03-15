@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import sys
+import shutil
 
 from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params, ssim
-from loaders import get_dataloaders
+from loaders import get_dataloaders, torch
 from models import VWARP
-
 
 try:
     with open("config.yaml", "r") as f:
@@ -24,6 +24,10 @@ except Exception as e:
 
 TRAIN = True
 DEBUG = CONFIG.get("debug", False)
+
+key = jax.random.PRNGKey(CONFIG["seed"])
+torch.manual_seed(CONFIG["seed"])
+np.random.seed(CONFIG["seed"])
 
 #%% Phase 2 Forward Definition
 def phase2_forward(model, ref_video, coords_grid, render):
@@ -85,7 +89,6 @@ def apply_augmentations(ref_videos, key):
     return ref_videos
 
 #%% Model & Optimiser Instantiation
-key = jax.random.PRNGKey(CONFIG["seed"])
 run_dir = setup_run_dir("phase_2", CONFIG, train=TRAIN)
 
 train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_2")
@@ -95,6 +98,13 @@ coords_grid = get_coords_grid(H, W)
 
 key, subkey = jax.random.split(key)
 model = VWARP(CONFIG, frame_shape=(H, W, C), key=subkey, init_gcm=False)
+
+## Print parameter counts (in each submodule)
+print(f"Total model parameters: {count_trainable_params(model)}")
+print(f"    - Encoder parameters: {count_trainable_params(model.encoder)}")
+print(f"    - Transition Model parameters: {count_trainable_params(model.transition_model)}")
+print(f"    - Inverse Dynamics Model: {count_trainable_params(model.action_model.idm)}")
+print(f"    - GCM parameters: {count_trainable_params(model.action_model.gcm)}")
 
 try:
     dummy_encoder = eqx.tree_deserialise_leaves(f"vwarp_enc.eqx", model.encoder)
@@ -253,4 +263,4 @@ if CONFIG["discrete_actions"]:
 
 
 # %% Copy nohup.log to run_dir for record keeping
-sys.shutil.copy("nohup.log", run_dir / "nohup_p2.log")
+shutil.copy("nohup.log", run_dir / "nohup_p2.log")

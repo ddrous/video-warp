@@ -4,13 +4,13 @@ V-WARP unifies world modelling and video generation by actively modulating the w
 
 ## Folder Structure
 
-* `config.yaml`: Shared base configurations for datasets, architectures
+* `config.yaml`: Shared base configurations for datasets, architectures, trainings, etc.
 * `loaders.py`: Data loaders for MovingMNIST, MiniGrid, WeatherBench, and PhyWorld environments.
 * `utils.py`: Utilities for metrics (SSIM), advanced visualization plotting, and run directory management.
 * `models.py`: Core components and the main `VWARP` class housing the vectorized inference rollout functions.
-* `phase_1.py`: **Autoencoder Pre-training.** Learns the base network and fits the `WeightCNN` to individual frames using SSIM/MSE.
-* `phase_2.py`: **Dynamics Fitting.** Uses teacher forcing to train the Inverse Dynamics Model (IDM) and transition model (FDM: $A+B$).
-* `phase_3.py`: **Generative Control.** Freezes the Dynamics & Encoder to train the Generative Control Model (GCM). The GCM learns to mimic the action sequences deduced by the IDM.
+* `phase1.py`: **Encoder Pre-training.** Learns the base network and fits a CNN to individual frames using SSIM/MSE.
+* `phase2.py`: **Dynamics Fitting.** Uses teacher forcing to train the Inverse Dynamics Model (IDM) and transition model (FDM: $A+B$).
+* `phase3.py`: **Generative Control.** Freezes the Dynamics & Encoder to train the Generative Control Model (GCM). The GCM learns to mimic the action sequences deduced by the IDM.
 
 ## Setup & Data
 
@@ -31,17 +31,17 @@ The modules run sequentially:
 
 1. **Pre-train Encoder** (from the root directory)
    ```bash
-   python phase_1.py
+   python phase1.py
     ```
 2. **Fit Dynamics**  (from the generated run directory, e.g., `runs/230101-123456/`)
    ```bash
-   python phase_2.py
+   python phase2.py
    ```
 3. **Train Generative Control**  (from the same run directory)
    ```bash
-   python phase_3.py
+   python phase3.py
    ```
 
 ## Metrics & Visualization
 * **SSIM**: Evaluates the structural similarity between predicted and ground truth frames.
-
+* **MSE**: Measures pixel-wise or latent space mean squared error.
