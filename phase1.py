@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import shutil
+import os
 
 from utils import setup_run_dir, get_coords_grid, ssim, plot_videos, count_trainable_params
 from loaders import get_dataloaders, torch
@@ -137,6 +138,11 @@ def eval_step(enc, batch_frames, coords_grid):
 
 #%% Training Loop
 
+## if f"vwarp_enc_{CONFIG["dataset"].lower()}.eqx" exists, load it instead of training
+if os.path.exists(f"artefacts/vwarp_enc_{CONFIG['dataset'].lower()}.eqx"):
+    print(f"Found existing pretrained encoder at ./artefacts/vwarp_enc_{CONFIG['dataset'].lower()}.eqx. Skipping training...")
+    TRAIN = False
+
 if TRAIN:
     print(f"\n🚀 Starting Phase 1: Encoder Pretraining -> Saving to {run_dir}")
     start_time = time.time()
@@ -154,7 +160,7 @@ if TRAIN:
             print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f}", flush=True)
 
         ## Visualize reconstructions every nb_epocsh/10 epochs
-        if (epoch+1) % (CONFIG["phase_1"]["nb_epochs"] // 10) == 0:
+        if (epoch+1) % max(1, CONFIG["phase_3"]["nb_epochs"] // 10) == 0:
             recon, mse_loss, ssim_loss = eval_step(encoder, vis_batch, coords_grid)
             # print(f"Sample Recon - MSE Loss: {mse_loss:.6f}, SSIM Loss: {ssim_loss:.6f}", flush=True)
             plot_videos(
@@ -165,24 +171,27 @@ if TRAIN:
 
     print("\nWall time:", time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
-    eqx.tree_serialise_leaves(run_dir / "vwarp_enc.eqx", encoder)
-    eqx.tree_serialise_leaves("vwarp_enc.eqx", encoder)
+    eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
+    eqx.tree_serialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
     print("✅ Saved isolated WeightCNN (with theta_base)")
 
     fig, ax = plt.subplots(figsize=(8, 4))
     ax.plot(epoch_losses_all, label='Loss')
-    ax.set_xlabel('Train Steps')
+    ax.set_xlabel('Train Step')
     ax.set_ylabel('Loss')
     ax.set_yscale('log')
     ax.set_title('Phase 1 Training Loss')
     plt.draw()
     plt.savefig(run_dir / "plots" / "p1_loss.png")
 
+    ## Save the array as well
+    np.save(run_dir / "artefacts" / "p1_loss.npy", np.array(epoch_losses_all))
+
 else:
     ## Print Warning
     print("⚠️ TRAIN is set to False. Loading encoder and visualizing reconstructions only.")
-    encoder = eqx.tree_deserialise_leaves("vwarp_enc.eqx", encoder)
-    eqx.tree_serialise_leaves(run_dir / "vwarp_enc.eqx", encoder)
+    encoder = eqx.tree_deserialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
+    eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
 
 #%% Visualise Reconstructions
 

@@ -41,11 +41,12 @@ phase_1:
 # Phase 2: Dynamics Fitting (IDM + FDM)
 # ==========================================
 phase_2:
-  nb_epochs: 1500
+  nb_epochs: 2000
   print_every: 10
   batch_size: 256
-  learning_rate: 1.0e-5
+  learning_rate: 1.0e-4
   loss_type: "latent"  # Options: "latent" or "pixel"
+  train_encoder: false  # Whether to allow gradients to flow into the encoder
   mse_weight: 0.16     # Only used if loss_type is "pixel"
   # Phase 2 Augmentations
   reverse_video_aug: true
@@ -62,10 +63,10 @@ phase_2:
 # Phase 3: Generative Control (GCM)
 # ==========================================
 phase_3:
-  nb_epochs: 1000
+  nb_epochs: 2000
   print_every: 10
   batch_size: 256
-  learning_rate: 1.0e-5
+  learning_rate: 1.0e-4
   loss_type: "L2"      # Options: "L1" or "L2"
   # Phase 3 LR Scheduler
   lr_patience: 300

@@ -106,20 +106,38 @@ print(f"    - Transition Model parameters: {count_trainable_params(model.transit
 print(f"    - Inverse Dynamics Model: {count_trainable_params(model.action_model.idm)}")
 print(f"    - GCM parameters: {count_trainable_params(model.action_model.gcm)}")
 
-try:
-    dummy_encoder = eqx.tree_deserialise_leaves(f"vwarp_enc.eqx", model.encoder)
-    model = eqx.tree_at(lambda m: m.encoder, model, dummy_encoder)
-    print(f"✅ Loaded Pretrained WeightCNN from ./")
-except Exception as e:
-    raise Exception(f"Error: Could not load pretrained encoder from ./vwarp_enc.eqx. ({e})")
+if not CONFIG["phase_2"]["train_encoder"]:
+    try:
+        dummy_encoder = eqx.tree_deserialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", model.encoder)
+        model = eqx.tree_at(lambda m: m.encoder, model, dummy_encoder)
+        print(f"✅ Loaded Pretrained WeightCNN encoder from ./artefacts")
+    except Exception as e:
+        raise Exception(f"Error: Could not load pretrained encoder from ./artefacts/vwarp_enc.eqx. ({e})")
+else:
+    print("⚠️ Config is set to train_encoder=True, so no pretrained encoder will be loaded. Training the encoder from scratch...")
 
 if not TRAIN:
     print("⏭️  Skipping Phase 2 training, loading...")
-    model = eqx.tree_deserialise_leaves("vwarp_phase2.eqx", model)
+    model = eqx.tree_deserialise_leaves(run_dir / "artefacts" / "vwarp_phase2.eqx", model)
 
 # FIX: Partition the model into trainable and frozen parts
 filter_spec = jax.tree_util.tree_map(eqx.is_inexact_array, model)
-filter_spec = eqx.tree_at(lambda m: m.encoder, filter_spec, replace=jax.tree_util.tree_map(lambda _: False, model.encoder))
+
+# Freeze the encoder if the config tells us to
+if not CONFIG["phase_2"]["train_encoder"]:
+    filter_spec = eqx.tree_at(
+        lambda m: m.encoder, 
+        filter_spec, 
+        replace=jax.tree_util.tree_map(lambda _: False, model.encoder)
+    )
+
+# ALWAYS freeze the GCM in Phase 2 (checking first just in case init_gcm was False)
+if getattr(model.action_model, "gcm", None) is not None:
+    filter_spec = eqx.tree_at(
+        lambda m: m.action_model.gcm, 
+        filter_spec, 
+        replace=jax.tree_util.tree_map(lambda _: False, model.action_model.gcm)
+    )
 
 diff_model, static_model = eqx.partition(model, filter_spec)
 
@@ -144,16 +162,20 @@ def train_step(diff_m, static_m, opt_state, batch_keys, in_videos, coords_grid):
         ref_videos = apply_augmentations(in_videos, batch_keys[0])
         batched_fn = jax.vmap(phase2_forward, in_axes=(None, 0, None, None))
         
-        needs_render = (CONFIG["phase_2"]["loss_type"] == "pixel")
+        needs_render = (CONFIG["phase_2"]["loss_type"] == "pixel" or CONFIG["phase_2"]["train_encoder"])
         (raw_actions, quant_actions), (pred_lats, gt_lats), pred_videos = batched_fn(m, ref_videos, coords_grid, needs_render)
 
-        if CONFIG["phase_2"]["loss_type"] == "latent":
+        if CONFIG["phase_2"]["loss_type"] == "latent" and not CONFIG["phase_2"]["train_encoder"]:
             loss = jnp.mean((pred_lats[:, :-1] - gt_lats[:, :-1])**2) 
         else:
-            target_videos = jnp.concatenate([ref_videos[:, 1:], jnp.zeros_like(ref_videos[:, :1])], axis=1)
-            mse_loss = jnp.mean((pred_videos[:, :-1] - target_videos[:, :-1])**2)
-            ssim_loss = 1.0 - jnp.mean(jax.vmap(jax.vmap(ssim))(pred_videos[:, :-1], target_videos[:, :-1]))
-            loss = ssim_loss + CONFIG["phase_2"]["mse_weight"] * mse_loss
+            # target_videos = jnp.concatenate([ref_videos[:, 1:], jnp.zeros_like(ref_videos[:, :1])], axis=1)
+            # mse_loss = jnp.mean((pred_videos[:, :-1] - target_videos[:, :-1])**2)
+
+            mse_loss = jnp.mean((pred_videos - ref_videos)**2)
+            ssim_loss = 1.0 - jnp.mean(jax.vmap(jax.vmap(ssim))(pred_videos, ref_videos))
+
+            mse_weight = CONFIG["phase_2"]["mse_weight"]
+            loss = (1-mse_weight)*ssim_loss + mse_weight*mse_loss
 
         if CONFIG["discrete_actions"]:
             book_loss = jnp.mean((jax.lax.stop_gradient(raw_actions) - quant_actions)**2)
@@ -181,6 +203,7 @@ if TRAIN:
     print(f"Trainable Params: {count_trainable_params(diff_model)}")
 
     start_time = time.time()
+    all_losses = []
     for epoch in range(CONFIG["phase_2"]["nb_epochs"]):
         epoch_losses = []
         lr_scales = []
@@ -194,6 +217,8 @@ if TRAIN:
 
             lr_scale = optax.tree_utils.tree_get(opt_state, "scale")
             lr_scales.append(lr_scale)
+
+        all_losses.extend(epoch_losses)
 
         if (epoch+1) % CONFIG["phase_2"]["print_every"] == 0:
             print(f"Phase 2 - Epoch {epoch+1}/{CONFIG['phase_2']['nb_epochs']} - Avg Loss: {np.mean(epoch_losses):.6f} - LR Scale: {np.mean(lr_scales):.4f}", flush=True)
@@ -214,20 +239,21 @@ if TRAIN:
 
     # Recombine to save the full model
     model = eqx.combine(diff_model, static_model)
-    eqx.tree_serialise_leaves(run_dir / "vwarp_phase2.eqx", model)
-    eqx.tree_serialise_leaves("vwarp_phase2.eqx", model)
+    eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_phase2.eqx", model)
     print("✅ Saved Phase 2 Model")
 
     ## Plot and save the loss as p2_loss.png
-    plt.figure(figsize=(8, 5))
-    plt.plot(epoch_losses, label="Phase 2 Loss")
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.yscale('log')
-    plt.title('Phase 2 Training Loss')
-    plt.legend()
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(all_losses, label='Loss')
+    ax.set_xlabel('Train Step')
+    ax.set_ylabel('Loss')
+    ax.set_yscale('log')
+    ax.set_title('Phase 2 Training Loss')
     plt.draw()
     plt.savefig(run_dir / "plots" / "p2_loss.png")
+
+    ## Save the array as well
+    np.save(run_dir / "artefacts" / "p2_loss.npy", np.array(all_losses))
 
 else:
     # Just in case TRAIN is false, make sure model is unified

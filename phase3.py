@@ -10,9 +10,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import sys
 import shutil
+import torch
 
 from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params
-from loaders import get_dataloaders, torch
+from loaders import get_dataloaders
 from models import VWARP
 
 try:
@@ -92,7 +93,7 @@ print(f"    - GCM parameters: {count_trainable_params(model.action_model.gcm)}")
 
 try:
     dummy = VWARP(CONFIG, frame_shape=(H, W, C), key=subkey, init_gcm=False)
-    dummy = eqx.tree_deserialise_leaves("vwarp_phase2.eqx", dummy)
+    dummy = eqx.tree_deserialise_leaves(run_dir / "artefacts" / "vwarp_phase2.eqx", dummy)
     
     model = eqx.tree_at(lambda m: m.encoder, model, dummy.encoder)
     model = eqx.tree_at(lambda m: m.transition_model, model, dummy.transition_model)
@@ -103,7 +104,7 @@ except Exception as e:
 
 if not TRAIN:
     print("⏭️  Skipping Phase 3 training...")
-    model = eqx.tree_deserialise_leaves("vwarp_phase3.eqx", model)
+    model = eqx.tree_deserialise_leaves(run_dir / "artefacts" / "vwarp_phase3.eqx", model)
 
 # Freeze everything EXCEPT GCM
 filter_spec = jax.tree_util.tree_map(lambda _: False, model)
@@ -154,6 +155,7 @@ if TRAIN:
     print(f"Trainable Params (GCM only): {count_trainable_params(diff_model)}")
 
     start_time = time.time()
+    all_losses = []
     for epoch in range(CONFIG["phase_3"]["nb_epochs"]):
         epoch_losses = []
         lr_scales = []
@@ -163,6 +165,8 @@ if TRAIN:
 
             lr_scale = optax.tree_utils.tree_get(opt_state, "scale")
             lr_scales.append(lr_scale)
+
+        all_losses.extend(epoch_losses)
 
         if (epoch+1) % CONFIG["phase_3"]["print_every"] == 0:
             print(f"Phase 3 - Epoch {epoch+1}/{CONFIG["phase_3"]['nb_epochs']} - Avg Loss: {np.mean(epoch_losses):.6f}", f"- LR Scale: {lr_scale:.4f}", flush=True)
@@ -181,20 +185,21 @@ if TRAIN:
     print("\nPhase 3 Wall time:", time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
     final_model = eqx.combine(diff_model, static_model)
-    eqx.tree_serialise_leaves(run_dir / "vwarp_phase3.eqx", final_model)
-    eqx.tree_serialise_leaves("vwarp_phase3.eqx", final_model)
+    eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_phase3.eqx", final_model)
     print("✅ Saved Phase 3 Model")
 
     ## Plot and save loss curve as p3_loss.png
-    plt.figure(figsize=(8, 5))
-    plt.plot(epoch_losses, label="Phase 3 Loss")
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Phase 3 Training Loss')
-    plt.yscale('log')
-    plt.legend()
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(all_losses, label='Loss')
+    ax.set_xlabel('Train Step')
+    ax.set_ylabel('Loss')
+    ax.set_yscale('log')
+    ax.set_title('Phase 3 Training Loss')
     plt.draw()
     plt.savefig(run_dir / "plots" / "p3_loss.png")
+
+    ## Save the array as well
+    np.save(run_dir / "artefacts" / "p3_loss.npy", np.array(all_losses))
 
 else:
     final_model = model
@@ -204,7 +209,7 @@ print("\n Generative Evaluation Rollout (context_ratio=0.0)...")
 sample_vis = next(iter(test_loader))[:3]
 
 # _, _, pred_videos = final_model(sample_vis, coords_grid, context_ratio=0.0)
-_, _, pred_videos = eval_step(final_model, sample_vis, context_ratio=0.0)
+pred_videos = eval_step(final_model, sample_vis, context_ratio=0.0)
 
 for i in range(pred_videos.shape[0]):
     plot_videos(

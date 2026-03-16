@@ -231,7 +231,7 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 font = ImageFont.truetype("Helvetica.ttc", 14)
             except IOError:
                 try:
-                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
                 except IOError:
                     font = ImageFont.load_default()
 
@@ -271,10 +271,10 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 if plot_ref:
                     gt_w = r_f.shape[1]
                     pred_w = p_f.shape[1]
-                    draw.text((gt_w // 2 - 9, 2), "GT", font=font, fill="black")
-                    draw.text((gt_w + video_gap + pred_w // 2 - 15, 2), "Pred", font=font, fill="black")
+                    draw.text((gt_w // 2 - 10, 2), "GT", font=font, fill="black")
+                    draw.text((gt_w + video_gap + pred_w // 2 - 17, 2), "Pred", font=font, fill="black")
                 else:
-                    draw.text((p_f.shape[1] // 2 - 15, 2), "Pred", font=font, fill="black")
+                    draw.text((p_f.shape[1] // 2 - 17, 2), "Pred", font=font, fill="black")
                 
                 gif_frames.append(final_img)
             
