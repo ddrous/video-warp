@@ -1,7 +1,7 @@
 # Shared Base Configurations for V-WARP
-dataset: "MovingMnist"
+dataset: "MiniGrid"
 data_path: "./data"
-seed: 2026
+seed: 42
 debug: false
 
 # Architecture Base (Inherited across all phases)
@@ -10,21 +10,22 @@ root_width: 12
 root_depth: 5
 num_fourier_freqs: 6
 use_time_in_root: false
-cnn_hidden_width: 64
+cnn_hidden_width: 32
 cnn_depth: 4
-lam_space: 4
+lam_space: 2
 mem_space: 256
 split_forward: true
-discrete_actions: false
-use_action_residuals: False
+discrete_actions: true
+num_actions: 200
+use_action_residuals: false
 
 # ==========================================
 # Phase 1: Autoencoder Pretraining
 # ==========================================
 phase_1:
-  nb_epochs: 750
+  nb_epochs: 100
   print_every: 10
-  batch_size: 64
+  batch_size: 16
   learning_rate: 1.0e-5
   encoder_sees_test: False
   mse_weight: 0.16
@@ -40,14 +41,14 @@ phase_1:
 # Phase 2: Dynamics Fitting (IDM + FDM)
 # ==========================================
 phase_2:
-  nb_epochs: 2000
+  nb_epochs: 2500
   print_every: 10
-  batch_size: 256
-  learning_rate: 1.0e-4
-  loss_type: "latent"   # Options: "latent" or "pixel"
+  batch_size: 16
+  learning_rate: 1.0e-5
+  loss_type: "latent"  # Options: "latent" or "pixel"
   train_encoder: false  # Whether to allow gradients to flow into the encoder
-  mse_weight: 0.16      # Only used if loss_type is "pixel"
-  num_actions: 5
+  mse_weight: 0.16     # Only used if loss_type is "pixel"
+  num_actions: 200
   # Phase 2 Augmentations
   reverse_video_aug: true
   static_video_aug: true
@@ -63,15 +64,15 @@ phase_2:
 # Phase 3: Generative Control (GCM)
 # ==========================================
 phase_3:
-  nb_epochs: 2000
+  nb_epochs: 5000
   print_every: 10
-  batch_size: 256
-  learning_rate: 1.0e-4
+  batch_size: 128
+  learning_rate: 1.0e-5
   loss_type: "L2"      # Options: "L1" or "L2"
-  gcm_type: "LSTM"
-  num_actions: 5
+  gcm_type: "LTSM"
+  num_actions: 200
   # Phase 3 LR Scheduler
-  lr_patience: 300
+  lr_patience: 500
   lr_factor: 0.5
   lr_cooldown: 100
   lr_rtol: 1.0e-4

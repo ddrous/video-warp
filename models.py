@@ -91,9 +91,12 @@ class ForwardDynamicsModule(eqx.Module):
 
     def __call__(self, z_prev, a):
         if self.split_forward:
-            return self.mlp_A(z_prev) + self.mlp_B(a)
+            z_a = self.mlp_A(z_prev)
+            z_b = self.mlp_B(a)
+            return (z_a, z_b), z_a + z_b
         else:
-            return self.giant_mlp(jnp.concatenate([z_prev, a], axis=-1))
+            out = self.giant_mlp(jnp.concatenate([z_prev, a], axis=-1))
+            return None, out
 
 class InverseDynamicsModule(eqx.Module):
     mlp: eqx.nn.MLP
@@ -123,7 +126,7 @@ class RNNController(eqx.Module):
     rnn_cell: eqx.Module
     action_decoder: eqx.nn.MLP
 
-    def __init__(self, lam_dim, mem_dim, latent_dim, key, rnn_type="GRU", **kwargs):
+    def __init__(self, lam_dim, mem_dim, latent_dim, out_dim, key, rnn_type="GRU", **kwargs):
         self.lam_dim = lam_dim
         self.d_model = mem_dim
         self.rnn_type = rnn_type.upper()
@@ -141,7 +144,6 @@ class RNNController(eqx.Module):
             raise ValueError("Unsupported rnn_type. Must be 'LSTM', 'GRU', or 'RNN'.")
 
         decode_input_dim = self.d_model + latent_dim
-        out_dim = lam_dim
         
         self.action_decoder = eqx.nn.MLP(
             in_size=decode_input_dim, out_size=out_dim, 
@@ -208,7 +210,7 @@ class TransformerController(eqx.Module):
     action_mlp: Optional[eqx.nn.MLP]
     output_proj: Optional[eqx.nn.Linear]
 
-    def __init__(self, lam_dim, mem_dim, latent_dim, key, max_len=20, num_heads=4, num_blocks=4, num_actions=4):
+    def __init__(self, lam_dim, mem_dim, latent_dim, out_dim, key, max_len=20, num_heads=4, num_blocks=4):
         self.max_len = max_len
         self.icl_decoding = True
         self.lam_dim = lam_dim
@@ -224,12 +226,9 @@ class TransformerController(eqx.Module):
 
         if self.icl_decoding:
             self.action_mlp = None
-            if num_actions:
-                self.output_proj = eqx.nn.Linear(self.d_model, num_actions, key=k6)
-            else:
-                self.output_proj = eqx.nn.Linear(self.d_model, lam_dim, key=k6)
+            self.output_proj = eqx.nn.Linear(self.d_model, out_dim, key=k6)
         else:
-            self.action_mlp = eqx.nn.MLP(self.d_model + latent_dim, lam_dim, width_size=self.d_model * 2, depth=3, key=k4)
+            self.action_mlp = eqx.nn.MLP(self.d_model + latent_dim, out_dim, width_size=self.d_model * 2, depth=3, key=k4)
             self.output_proj = None
 
     def reset(self, T):
@@ -272,15 +271,15 @@ class GenerativeControlModule(eqx.Module):
 
     seq_model: eqx.Module
 
-    def __init__(self, lam_dim, mem_dim, latent_dim, key, gcm_type="GRU", **kwargs):
+    def __init__(self, lam_dim, mem_dim, latent_dim, out_dim, key, gcm_type="GRU", **kwargs):
         self.lam_dim = lam_dim
         self.d_model = mem_dim
         self.gcm_type = gcm_type.upper()
 
         if self.gcm_type in ["LSTM", "GRU", "RNN"]:
-            self.seq_model = RNNController(lam_dim, mem_dim, latent_dim, key=key, rnn_type=gcm_type)
+            self.seq_model = RNNController(lam_dim, mem_dim, latent_dim, out_dim, key=key, rnn_type=gcm_type)
         elif self.gcm_type == "TRANSFORMER":
-            self.seq_model = TransformerController(lam_dim, mem_dim, latent_dim, key=key, **kwargs)
+            self.seq_model = TransformerController(lam_dim, mem_dim, latent_dim, out_dim, key=key, **kwargs)
         else:
             raise ValueError("Unsupported gcm_type. Must be 'LSTM', 'GRU', 'RNN', or 'TRANSFORMER'.")
 
@@ -297,40 +296,79 @@ class LatentActionModule(eqx.Module):
     idm: InverseDynamicsModule
     gcm: Optional[eqx.Module]
     discrete_actions: bool = eqx.field(static=True)
-    action_embeddings: Optional[eqx.nn.Embedding]
 
-    def __init__(self, dyn_dim, lam_dim, mem_dim, num_actions, init_gcm, key):
+    idm_embeddings: Optional[eqx.nn.Embedding]
+    gcm_embeddings: Optional[eqx.nn.Embedding]
+
+    action_bridge: Optional[eqx.nn.MLP]
+    translate_actions: bool = eqx.field(static=True)
+
+    def __init__(self, dyn_dim, lam_dim, mem_dim, num_actions, init_gcm, gcm_type, key):
         k1, k2 = jax.random.split(key)
         self.discrete_actions = num_actions is not None
         self.idm = InverseDynamicsModule(dyn_dim, lam_dim, key=k1)
-        
+
+        if type(num_actions) == tuple and len(num_actions) == 2: 
+            num_actions_idm, num_actions_gcm = num_actions
+        else:
+            num_actions_idm = num_actions_gcm = num_actions
+
+        if self.discrete_actions:
+            emb_weights = jnp.zeros((num_actions_idm, lam_dim))
+            self.idm_embeddings = eqx.nn.Embedding(weight=emb_weights, key=k2)
+        else:
+            self.idm_embeddings = None
+
+        self.translate_actions = num_actions_gcm != num_actions_idm
         if init_gcm:
-            self.gcm = GenerativeControlModule(lam_dim, mem_dim, dyn_dim, key=k2, rnn_type="GRU")
+            # gcm_input_dim = lam_dim*num_actions_idm if self.translate_actions else lam_dim
+            # gcm_lam_dim = 1*num_actions_idm if self.translate_actions else lam_dim
+            gcm_lam_dim = lam_dim
+            # self.gcm = GenerativeControlModule(lam_dim, mem_dim, dyn_dim, gcm_lam_dim, key=k2, rnn_type="GRU")
+            self.gcm = GenerativeControlModule(lam_dim, mem_dim, dyn_dim, gcm_lam_dim, key=k2, gcm_type=gcm_type, max_len=12, num_heads=4, num_blocks=4)
         else:
             self.gcm = None
 
-        if self.discrete_actions:
-            emb_weights = jnp.zeros((num_actions, lam_dim))
-            self.action_embeddings = eqx.nn.Embedding(weight=emb_weights, key=k2)
+        if self.gcm:
+            emb_weights_gcm = jnp.zeros((num_actions_gcm, gcm_lam_dim))
+            if self.translate_actions:
+                self.gcm_embeddings = eqx.nn.Embedding(weight=emb_weights_gcm, key=k2)
+                self.action_bridge = eqx.nn.MLP(gcm_lam_dim+dyn_dim, lam_dim, width_size=dyn_dim, depth=2, key=k2)
+            else:
+                self.gcm_embeddings = None
+                self.action_bridge = None
         else:
-            self.action_embeddings = None
+            self.gcm_embeddings = None
+            self.action_bridge = None
 
-    def quantise_action(self, raw_action):
-        dists = jnp.sum((raw_action - self.action_embeddings.weight) ** 2, axis=-1)
+
+    def quantise_idm_action(self, raw_action):
+        dists = jnp.sum((raw_action - self.idm_embeddings.weight) ** 2, axis=-1)
         closest_idx = jnp.argmin(dists)
-        return raw_action, self.action_embeddings(closest_idx)
+        return raw_action, self.idm_embeddings(closest_idx)
 
-    def inverse_dynamics(self, z_prev, z_target):
+    def quantise_gcm_action(self, raw_action):
+        if self.translate_actions:
+            dists = jnp.sum((raw_action - self.gcm_embeddings.weight) ** 2, axis=-1)
+            closest_idx = jnp.argmin(dists)
+            quant_action = self.gcm_embeddings(closest_idx)
+        else:
+            dists = jnp.sum((raw_action - self.idm_embeddings.weight) ** 2, axis=-1)
+            closest_idx = jnp.argmin(dists)
+            quant_action = self.idm_embeddings(closest_idx)         ## Use IDM emneddings directly
+        return raw_action, quant_action
+
+    def decode_idm(self, z_prev, z_target):
         raw_action = self.idm(z_prev, z_target)
         if not self.discrete_actions:
             return raw_action, raw_action
-        return self.quantise_action(raw_action)
+        return self.quantise_idm_action(raw_action)
 
     def decode_gcm(self, buffer, step_idx, z_current):
         raw_action = self.gcm.decode_gcm(buffer, step_idx, z_current)
         if not self.discrete_actions:
             return raw_action, raw_action
-        return self.quantise_action(raw_action)
+        return self.quantise_gcm_action(raw_action)
 
     def encode_gcm(self, buffer, step_idx, z_current, a):
         return self.gcm.encode_gcm(buffer, step_idx, z_current, a)
@@ -383,10 +421,12 @@ class VWARP(eqx.Module):
 
         self.transition_model = ForwardDynamicsModule(self.d_theta, self.lam_dim, self.split_forward, key=k_fwd)
 
-        num_actions = config["num_actions"] if config["discrete_actions"] else None
+        num_actions_idm = config["phase_2"]["num_actions"]
+        num_actions_gcm = config["phase_3"]["num_actions"]
+        num_actions = (num_actions_idm, num_actions_gcm) if config["discrete_actions"] else None
         self.action_model = LatentActionModule(
             self.d_theta, self.lam_dim, self.mem_dim, 
-            num_actions=num_actions, init_gcm=init_gcm, key=k_lam
+            num_actions=num_actions, init_gcm=init_gcm, key=k_lam, gcm_type=config["phase_3"]["gcm_type"]
         )
 
     def render_pixels(self, theta, coords):
@@ -416,11 +456,11 @@ class VWARP(eqx.Module):
         
         z_init = self.encoder(jnp.transpose(init_frame, (2, 0, 1)))
         m_init = self.action_model.reset_gcm(T)
-        a_init = jnp.zeros((self.lam_dim,))
+        z_A_init = self.transition_model.mlp_A(z_init) if self.split_forward else None
 
         @eqx.filter_checkpoint
         def scan_step(carry, scan_inputs):
-            z_t, m_t, a_tm1 = carry
+            z_t, m_t, z_tA = carry
             o_tp1, step_idx = scan_inputs
 
             time_coord = jnp.array([(step_idx-1)/(T-1)], dtype=z_t.dtype)
@@ -429,24 +469,29 @@ class VWARP(eqx.Module):
 
             is_context = (step_idx / T) <= context_ratio
 
+            def true_fn():
+                return self.action_model.decode_idm(z_t, self.encoder(jnp.transpose(o_tp1, (2, 0, 1))))
+            def false_fn():
+                raw_a, quant_a = self.action_model.decode_gcm(m_t, step_idx, z_t)
+                if self.action_model.translate_actions:
+                    raw_a = self.action_model.action_bridge(jnp.concatenate([raw_a, z_t], axis=-1))
+                    quant_a = self.action_model.action_bridge(jnp.concatenate([quant_a, z_t], axis=-1))
+                return raw_a, quant_a
+
             a_t_raw, a_t = jax.lax.cond(
                 is_context,
-                lambda: self.action_model.inverse_dynamics(z_t, self.encoder(jnp.transpose(o_tp1, (2, 0, 1)))),
-                lambda: self.action_model.decode_gcm(m_t, step_idx, z_t)
+                lambda: true_fn(),
+                lambda: false_fn()
             )
 
-            if self.use_action_residuals:
-                a_t_raw = a_t_raw + a_tm1
-                a_t = a_t + a_tm1
-
             m_tp1 = self.action_model.encode_gcm(m_t, step_idx, z_t, a_t)
-            z_tp1 = self.transition_model(z_t, a_t)
+            (z_tp1A, _), z_tp1 = self.transition_model(z_t, a_t)
 
-            return (z_tp1, m_tp1, a_t), ((a_t_raw, a_t), z_t, pred_out)
+            return (z_tp1, m_tp1, z_tp1A), ((a_t_raw, a_t), z_t, pred_out)
 
         scan_inputs = (jnp.concatenate([ref_video[1:], jnp.zeros_like(ref_video[:1])], axis=0), jnp.arange(1, T+1))
-        _, (actions, pred_latents, pred_video) = jax.lax.scan(scan_step, (z_init, m_init, a_init), scan_inputs)
-        
+        _, (actions, pred_latents, pred_video) = jax.lax.scan(scan_step, (z_init, m_init, z_A_init), scan_inputs)
+
         return actions, pred_latents, pred_video
 
     def __call__(self, ref_videos, coords_grid, context_ratio=0.0):

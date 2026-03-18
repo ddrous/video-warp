@@ -1,5 +1,5 @@
 # Shared Base Configurations for V-WARP
-dataset: "MiniGrid"
+dataset: "PhyWorld"
 data_path: "./data"
 seed: 2026
 debug: false
@@ -16,7 +16,6 @@ lam_space: 32
 mem_space: 256
 split_forward: true
 discrete_actions: true
-num_actions: 5
 use_action_residuals: false
 
 # ==========================================
@@ -47,6 +46,7 @@ phase_2:
   learning_rate: 1.0e-5
   loss_type: "latent"  # Options: "latent" or "pixel"
   mse_weight: 0.16     # Only used if loss_type is "pixel"
+  num_actions: 5
   # Phase 2 Augmentations
   reverse_video_aug: true
   static_video_aug: true
@@ -67,6 +67,7 @@ phase_3:
   batch_size: 16
   learning_rate: 1.0e-5
   loss_type: "L2"      # Options: "L1" or "L2"
+  num_actions: 5
   # Phase 3 LR Scheduler
   lr_patience: 300
   lr_factor: 0.5

@@ -160,7 +160,7 @@ if TRAIN:
             print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f}", flush=True)
 
         ## Visualize reconstructions every nb_epocsh/10 epochs
-        if (epoch+1) % max(1, CONFIG["phase_3"]["nb_epochs"] // 10) == 0:
+        if (epoch+1) % max(1, CONFIG["phase_1"]["nb_epochs"] // 10) == 0:
             recon, mse_loss, ssim_loss = eval_step(encoder, vis_batch, coords_grid)
             # print(f"Sample Recon - MSE Loss: {mse_loss:.6f}, SSIM Loss: {ssim_loss:.6f}", flush=True)
             plot_videos(

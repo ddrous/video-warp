@@ -36,7 +36,9 @@ def phase2_forward(model, ref_video, coords_grid, render):
     init_frame = ref_video[0]
 
     z_init = model.encoder(jnp.transpose(init_frame, (2, 0, 1)))
-    z_init = jax.lax.stop_gradient(z_init)
+    if not CONFIG["phase_2"]["train_encoder"]:
+        z_init = jax.lax.stop_gradient(z_init)
+
     a_init = jnp.zeros((model.lam_dim,))
 
     @eqx.filter_checkpoint
@@ -52,15 +54,15 @@ def phase2_forward(model, ref_video, coords_grid, render):
             pred_out = None
 
         z_tp1_enc = jax.lax.stop_gradient(model.encoder(jnp.transpose(o_tp1, (2, 0, 1))))
-        a_t_raw, a_t_quant = model.action_model.inverse_dynamics(z_t, z_tp1_enc)
-
-        if getattr(model, "use_action_residuals", False):
-            a_t_raw = a_t_raw + a_tm1
-            a_t_quant = a_t_quant + a_tm1
+        a_t_raw, a_t_quant = model.action_model.decode_idm(z_t, z_tp1_enc)
 
         # Gradient STE Estimator
-        a_t = a_t_raw + jax.lax.stop_gradient(a_t_quant - a_t_raw)
-        z_tp1 = model.transition_model(z_t, a_t)
+        if CONFIG["discrete_actions"]:
+            a_t = a_t_raw + jax.lax.stop_gradient(a_t_quant - a_t_raw)
+        else:
+            a_t = a_t_raw
+
+        _, z_tp1 = model.transition_model(z_t, a_t)
 
         return (z_tp1, a_t), ((a_t_raw, a_t_quant), (z_tp1, z_tp1_enc), pred_out)
 
@@ -100,9 +102,12 @@ key, subkey = jax.random.split(key)
 model = VWARP(CONFIG, frame_shape=(H, W, C), key=subkey, init_gcm=False)
 
 ## Print parameter counts (in each submodule)
+print(f"Dimentionality of the latent dyanmics space: {model.d_theta}")
+print(f"Dimentionality of the latent action space: {model.lam_dim}")
+
 print(f"Total model parameters: {count_trainable_params(model)}")
-print(f"    - Encoder parameters: {count_trainable_params(model.encoder)}")
-print(f"    - Transition Model parameters: {count_trainable_params(model.transition_model)}")
+print(f"    - Encoder: {count_trainable_params(model.encoder)}")
+print(f"    - Transition Model: {count_trainable_params(model.transition_model)}")
 print(f"    - Inverse Dynamics Model: {count_trainable_params(model.action_model.idm)}")
 print(f"    - GCM parameters: {count_trainable_params(model.action_model.gcm)}")
 
@@ -261,21 +266,23 @@ else:
 
 #%% Visualisations
 print("\n Generating Visualizations...")
-sample_vis = next(iter(test_loader))[:3]
+sample_vis = next(iter(test_loader))[:]
 
 (raw_acts, quant_acts), _, pred_videos = eval_step(model, sample_vis, coords_grid)
 
-targets = np.concatenate([sample_vis[:, 1:], np.zeros_like(sample_vis[:, :1])], axis=1)
+test_seq_id = np.random.randint(0, sample_vis.shape[0])
+# test_seq_id = 0
+print(f"    - Sample {test_seq_id} from test set...")
 
-for i in range(pred_videos.shape[0]):
-    plot_videos(
-        video=pred_videos[i, :-1], 
-        ref_video=targets[i, :-1], 
-        plot_ref=True, 
-        save_name=run_dir / "plots" / f"p2_vis_{i}.png",
-        save_video=True
-    )
+plot_videos(
+    video=pred_videos[test_seq_id], 
+    ref_video=sample_vis[test_seq_id], 
+    plot_ref=True, 
+    save_name=run_dir / "plots" / f"p2_vis_{test_seq_id}.png",
+    save_video=False
+)
 
+#%%
 if CONFIG["discrete_actions"]:
     print("Plotting Discrete Latent Action Heatmap for Sequence 0")
     plt.figure(figsize=(12, 6))
@@ -286,7 +293,6 @@ if CONFIG["discrete_actions"]:
     plt.tight_layout()
     plt.savefig(run_dir / "plots" / "p2_action_heatmap.png")
     plt.show()
-
 
 # %% Copy nohup.log to run_dir for record keeping
 shutil.copy("nohup.log", run_dir / "nohup_p2.log")
