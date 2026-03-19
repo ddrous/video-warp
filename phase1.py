@@ -28,7 +28,7 @@ except Exception as e:
     except Exception as e:
         raise Exception(f"Error: Could not load config.yaml. ({e})")
 
-TRAIN = True
+TRAIN = False
 DEBUG = CONFIG.get("debug", False)
 
 key = jax.random.PRNGKey(CONFIG["seed"])
@@ -39,9 +39,14 @@ np.random.seed(CONFIG["seed"])
 run_dir = setup_run_dir("phase_1", CONFIG, train=TRAIN)
 
 train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_1")
+
 vis_batch = next(iter(train_loader))[:2]
-print(f"Sample batch shape: {vis_batch.shape}")
-B, H, W, C = vis_batch.shape
+print(f"Sample batch shape: {vis_batch.shape}", flush=True)
+if vis_batch.ndim == 4:
+    B, H, W, C = vis_batch.shape
+    T = 1
+elif vis_batch.ndim == 5:
+    B, T, H, W, C = vis_batch.shape
 coords_grid = get_coords_grid(H, W)
 
 key, k_root, k_enc = jax.random.split(key, 3)
@@ -66,7 +71,7 @@ encoder = WeightCNN(
 ## Print parameter counts (in the layers, and in the theta base)
 print(f"Total encoder parameters: {count_trainable_params(encoder)}")
 print(f"    - of which theta_base has {flat_params.shape[0]} parameters")
-print(f"    - and the rest of the CNN has {count_trainable_params(encoder) - flat_params.shape[0]} parameters")
+print(f"    - and the layers of the CNN has {count_trainable_params(encoder.layers)} parameters", flush=True)
 
 def render_frame(enc, offset, coords_grid):
     flat_coords = coords_grid.reshape(-1, 3)
@@ -101,6 +106,12 @@ opt_state = optimizer.init(encoder)
 
 @eqx.filter_jit
 def train_step(enc, opt_state, batch_frames, coords_grid):
+
+    ## If the batch frames haave a time dimension, we must flatten along that channel
+    if batch_frames.ndim == 5:  # (B, T, H, W, C) -> (B*T, H, W, C)
+        B, T, H, W, C = batch_frames.shape
+        batch_frames = batch_frames.reshape(B*T, H, W, C)
+
     def loss_fn(e):
         frames_enc = jnp.transpose(batch_frames, (0, 3, 1, 2))
         offsets = jax.vmap(e)(frames_enc)
@@ -123,6 +134,13 @@ def train_step(enc, opt_state, batch_frames, coords_grid):
 
 @eqx.filter_jit
 def eval_step(enc, batch_frames, coords_grid):
+
+    ## If the batch frames haave a time dimension, we must flatten along that channel
+    orig_dim = batch_frames.ndim
+    if orig_dim == 5:  # (B, T, H, W, C) -> (B*T, H, W, C)
+        B, T, H, W, C = batch_frames.shape
+        batch_frames = batch_frames.reshape(B*T, H, W, C)
+
     """ Simply compute the reconstructted frames for a given batch, to be used in visualisation. Compute two losses and return them """
     frames_enc = jnp.transpose(batch_frames, (0, 3, 1, 2))
     offsets = jax.vmap(enc)(frames_enc)
@@ -134,6 +152,10 @@ def eval_step(enc, batch_frames, coords_grid):
     mse_loss = jnp.mean((reconstructed - batch_frames)**2)
     ssim_loss = 1.0 - jnp.mean(jax.vmap(ssim)(reconstructed, batch_frames))
     
+    ## Reshape the reconstructed frames back to (B, T, H, W, C) if needed
+    if orig_dim == 5:
+        reconstructed = reconstructed.reshape(B, T, H, W, C)
+
     return reconstructed, mse_loss, ssim_loss
 
 #%% Training Loop
@@ -164,8 +186,8 @@ if TRAIN:
             recon, mse_loss, ssim_loss = eval_step(encoder, vis_batch, coords_grid)
             # print(f"Sample Recon - MSE Loss: {mse_loss:.6f}, SSIM Loss: {ssim_loss:.6f}", flush=True)
             plot_videos(
-                np.expand_dims(recon, axis=1)[0], 
-                np.expand_dims(vis_batch, axis=1)[0], 
+                np.expand_dims(recon, axis=1)[0] if recon.ndim == 4 else recon[0],
+                np.expand_dims(vis_batch, axis=1)[0] if vis_batch.ndim == 4 else vis_batch[0],
                 plot_ref=True, show_titles=True, save_name=run_dir / "plots" / f"p1_epoch{epoch+1}.png"
             )
 
@@ -201,9 +223,11 @@ reconstructed, mse_loss, ssim_loss = eval_step(encoder, test_batch, coords_grid)
 test_id = np.random.randint(0, test_batch.shape[0])
 print(f"    - Sample {test_id} from test set...")
 
+print(reconstructed.shape, test_batch.shape)
+
 plot_videos(
-    np.expand_dims(reconstructed, axis=1)[test_id], 
-    np.expand_dims(test_batch, axis=1)[test_id], 
+    np.expand_dims(reconstructed, axis=1)[test_id] if reconstructed.ndim == 4 else reconstructed[test_id],
+    np.expand_dims(test_batch, axis=1)[test_id] if test_batch.ndim == 4 else test_batch[test_id],
     plot_ref=True, show_titles=False, save_name=run_dir / "plots" / "phase1_recons.png"
 )
 

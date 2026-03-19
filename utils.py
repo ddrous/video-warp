@@ -8,6 +8,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import seaborn as sns
 from PIL import Image, ImageFont, ImageDraw
 
@@ -99,12 +100,17 @@ def ssim(x, y, data_range=1.0):
 
     return ssim_numerator / ssim_denominator
 
+
 def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_labels=True, forecast_start=None, 
                 vmin=None, vmax=None, save_name=None, 
                 wspace=0.05, hspace=0.05, forecast_gap=0.2, 
-                save_video=False, video_gap=5):
+                save_video=False, video_gap=5, show_borders=False, corner_radius=5):
     """
     Plots a camera-ready rollout of ground truth and predicted video frames.
+    
+    Args:
+        show_borders (bool): If True, applies rounded borders to the frames.
+        corner_radius (int): The radius of the rounded corners (if show_borders=True).
     """
     with plt.rc_context({
         'font.family': 'sans-serif',
@@ -173,19 +179,35 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 ref_frame = np.clip(ref_frame, 0.0, 1.0)
                 if ref_frame.shape[-1] == 1: ref_frame = np.repeat(ref_frame, 3, axis=-1)
 
+            # Capture the imshow objects so we can apply clip_path
             if plot_ref:
-                axes[0, c].imshow(ref_frame)
-                axes[1, c].imshow(pred_frame)
-                target_axes = [axes[0, c], axes[1, c]]
+                im_ref = axes[0, c].imshow(ref_frame)
+                im_pred = axes[1, c].imshow(pred_frame)
+                target_axes = [(axes[0, c], im_ref, ref_frame), (axes[1, c], im_pred, pred_frame)]
             else:
-                axes[0, c].imshow(pred_frame, **imshow_kwargs)
-                target_axes = [axes[0, c]]
+                im_pred = axes[0, c].imshow(pred_frame, **imshow_kwargs)
+                target_axes = [(axes[0, c], im_pred, pred_frame)]
 
-            for ax in target_axes:
+            for ax, im_obj, frame_data in target_axes:
                 ax.set_xticks([])
                 ax.set_yticks([])
+                
+                h, w = frame_data.shape[:2]
+                
+                # Turn off default square spines
                 for spine in ax.spines.values():
                     spine.set_visible(False)
+                    
+                # Conditionally apply the rounded border and clipping
+                if show_borders:
+                    rect = patches.FancyBboxPatch(
+                        (-0.5, -0.5), w, h,
+                        boxstyle=f"round,pad=0,rounding_size={corner_radius}", 
+                        linewidth=1.2, edgecolor='black', facecolor='none',
+                        transform=ax.transData
+                    )
+                    ax.add_patch(rect)
+                    im_obj.set_clip_path(rect)
 
             if show_titles:
                 top_ax = axes[0, c]
@@ -206,26 +228,22 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             else:
                 axes[0, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
 
-        # # plt.draw(flush=True)
-
-        # ## Plot imediately, then close after saving to ensure memory is freed for next plot
-        # plt.draw()
-
         if save_name:
             plt.savefig(save_name, dpi=100, bbox_inches='tight', facecolor='white', transparent=False)
         else:
             plt.draw()
 
-        # 2. Force immediate display of the figure
         try:
             from IPython.display import display
             display(fig)
         except ImportError:
             plt.show()
             
-        # 3. Close the figure to free up memory and prevent double-plotting
         plt.close(fig)
 
+        # ---------------------------------------------------------
+        # GIF / Video Generation
+        # ---------------------------------------------------------
         if save_video and save_name is not None:
             try:
                 font = ImageFont.truetype("Helvetica.ttc", 14)
@@ -234,6 +252,29 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                     font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
                 except IOError:
                     font = ImageFont.load_default()
+
+            def process_pil_image(img_array, radius=corner_radius, apply_frame=show_borders):
+                """Helper function to conditionally apply rounded corners and a border."""
+                h, w = img_array.shape[:2]
+                img = Image.fromarray((img_array * 255).astype(np.uint8))
+                
+                if not apply_frame:
+                    return img
+                
+                # Create a rounded mask
+                mask = Image.new("L", (w, h), 0)
+                draw = ImageDraw.Draw(mask)
+                draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
+                
+                # Paste the frame using the mask onto a white background
+                rounded_img = Image.new("RGB", (w, h), "white")
+                rounded_img.paste(img, (0, 0), mask=mask)
+                
+                # Draw the bounding frame border
+                draw_border = ImageDraw.Draw(rounded_img)
+                draw_border.rounded_rectangle((0, 0, w-1, h-1), radius=radius, outline="black", width=1)
+                
+                return rounded_img
 
             gif_frames = []
             for t in range(nb_frames):
@@ -255,17 +296,24 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                     r_f = np.clip(r_f, 0.0, 1.0)
                     if r_f.shape[-1] == 1: r_f = np.repeat(r_f, 3, axis=-1)
                     
-                    gap_block = np.ones((r_f.shape[0], video_gap, 3), dtype=r_f.dtype)
-                    combined_frame = np.concatenate([r_f, gap_block, p_f], axis=1)
+                    # Apply styling to individual frames conditionally
+                    img_ref = process_pil_image(r_f)
+                    img_pred = process_pil_image(p_f)
+                    
+                    # Create canvas for both
+                    combined_w = img_ref.width + video_gap + img_pred.width
+                    combined_h = max(img_ref.height, img_pred.height)
+                    combined_frame = Image.new('RGB', (combined_w, combined_h), 'white')
+                    
+                    # Paste them side-by-side
+                    combined_frame.paste(img_ref, (0, 0))
+                    combined_frame.paste(img_pred, (img_ref.width + video_gap, 0))
                 else:
-                    combined_frame = p_f
-
-                frame_uint8 = (combined_frame * 255).astype(np.uint8)
-                base_img = Image.fromarray(frame_uint8)
+                    combined_frame = process_pil_image(p_f)
 
                 header_height = 15
-                final_img = Image.new('RGB', (base_img.width, base_img.height + header_height), color='white')
-                final_img.paste(base_img, (0, header_height))
+                final_img = Image.new('RGB', (combined_frame.width, combined_frame.height + header_height), color='white')
+                final_img.paste(combined_frame, (0, header_height))
                 
                 draw = ImageDraw.Draw(final_img)
                 if plot_ref:

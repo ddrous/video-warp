@@ -116,7 +116,7 @@ class WeatherBenchTemperature(Dataset):
         return torch.from_numpy(seq)
 
 class PhyWorldDataset(Dataset):
-    def __init__(self, data_path, seq_len=12):
+    def __init__(self, data_path, seq_len=32):
         self.data_path = data_path
         self.seq_len = seq_len
         self.video_data = []
@@ -152,7 +152,10 @@ class PhyWorldDataset(Dataset):
             frames = np.concatenate([frames, pad], axis=0)
         else:
             frames = frames[:self.seq_len]
-            
+
+        ## Downsample the frames to 128 x 128 to reduce memory
+        frames = frames[:, ::2, ::2, :]
+
         return torch.from_numpy(frames.astype(np.float32))
 
 def get_dataloaders(config, phase="phase_1"):
@@ -206,13 +209,15 @@ def get_dataloaders(config, phase="phase_1"):
         dataset = WeatherBenchTemperature(data_path=f"{data_path}/WeatherBench", split="train")
         test_dataset = WeatherBenchTemperature(data_path=f"{data_path}/WeatherBench", split="val", mean=dataset.mean, std=dataset.std)
         if is_phase1:
-            raise NotImplementedError("Phase 1 Frame Extraction for WeatherBench is custom.")
-            
+            # raise NotImplementedError("Phase 1 Frame Extraction for WeatherBench is custom.")
+            print("⚠️ Phase 1 Frame Extraction not implemented. Time dimension will be falttened during training. Could cause issues!")
+
     elif dataset_name.lower() == "phyworld":
-        dataset = PhyWorldDataset(f"{data_path}/PhyWorld/collision_30K.hdf5", seq_len=12)
-        test_dataset = PhyWorldDataset(f"{data_path}/PhyWorld/collision_eval.hdf5", seq_len=12)
+        dataset = PhyWorldDataset(f"{data_path}/PhyWorld/collision_30K.hdf5", seq_len=32)
+        test_dataset = PhyWorldDataset(f"{data_path}/PhyWorld/collision_eval.hdf5", seq_len=32)
         if is_phase1:
-            raise NotImplementedError("Phase 1 Frame Extraction for PhyWorld is custom.")
+            # raise NotImplementedError("Phase 1 Frame Extraction for PhyWorld is custom.")
+            print("⚠️ Phase 1 Frame Extraction not implemented. Time dimension will be falttened during training. Could cause issues!")
             
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
@@ -227,3 +232,23 @@ def get_dataloaders(config, phase="phase_1"):
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=numpy_collate, drop_last=False)
     
     return train_loader, test_loader
+
+#%% Test to visualise some batches from the dataloader
+if __name__ == "__main__":
+    import yaml
+    from utils import plot_videos
+
+    with open("config.yaml", "r") as f:
+        CONFIG = yaml.safe_load(f)
+
+    dataset = CONFIG["dataset"]
+    train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_1")
+    sample_batch = next(iter(train_loader))
+    print(f"Sample batch shape from {dataset} train loader: {sample_batch.shape}")
+
+    seq_idx = np.random.randint(sample_batch.shape[0])
+    plot_videos(sample_batch[seq_idx],
+                plot_ref=False,
+                save_name=f"artefacts/test_vis.png",
+                save_video=True,
+    )

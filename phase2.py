@@ -22,7 +22,7 @@ try:
 except Exception as e:
     raise Exception(f"Error: Could not load config.yaml. ({e})")
 
-TRAIN = True
+TRAIN = False
 DEBUG = CONFIG.get("debug", False)
 
 key = jax.random.PRNGKey(CONFIG["seed"])
@@ -62,6 +62,8 @@ def phase2_forward(model, ref_video, coords_grid, render):
         else:
             a_t = a_t_raw
 
+        # a_t = a_t.at[:2].set(0.0)  # Zero out the first two dimensions corresponding to the static action components    
+
         _, z_tp1 = model.transition_model(z_t, a_t)
 
         return (z_tp1, a_t), ((a_t_raw, a_t_quant), (z_tp1, z_tp1_enc), pred_out)
@@ -96,6 +98,7 @@ run_dir = setup_run_dir("phase_2", CONFIG, train=TRAIN)
 train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_2")
 sample_batch = next(iter(train_loader))
 B, T, H, W, C = sample_batch.shape
+print(f"Sample batch shape: {sample_batch.shape}", flush=True)
 coords_grid = get_coords_grid(H, W)
 
 key, subkey = jax.random.split(key)
@@ -109,7 +112,7 @@ print(f"Total model parameters: {count_trainable_params(model)}")
 print(f"    - Encoder: {count_trainable_params(model.encoder)}")
 print(f"    - Transition Model: {count_trainable_params(model.transition_model)}")
 print(f"    - Inverse Dynamics Model: {count_trainable_params(model.action_model.idm)}")
-print(f"    - GCM parameters: {count_trainable_params(model.action_model.gcm)}")
+print(f"    - GCM parameters: {count_trainable_params(model.action_model.gcm)}", flush=True)
 
 if not CONFIG["phase_2"]["train_encoder"]:
     try:
@@ -237,6 +240,7 @@ if TRAIN:
                 video=pred_videos[0], 
                 ref_video=sample_batch[0], 
                 plot_ref=True, 
+                show_borders=True,
                 save_name=run_dir / "plots" / f"p2_epoch{epoch+1}.png"
             )
 
@@ -278,6 +282,7 @@ plot_videos(
     video=pred_videos[test_seq_id], 
     ref_video=sample_vis[test_seq_id], 
     plot_ref=True, 
+    show_borders=True,
     save_name=run_dir / "plots" / f"p2_vis_{test_seq_id}.png",
     save_video=False
 )

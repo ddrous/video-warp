@@ -276,9 +276,9 @@ class GenerativeControlModule(eqx.Module):
         self.d_model = mem_dim
         self.gcm_type = gcm_type.upper()
 
-        if self.gcm_type in ["LSTM", "GRU", "RNN"]:
+        if self.gcm_type.lower() in ["lstm", "gru", "rnn"]:
             self.seq_model = RNNController(lam_dim, mem_dim, latent_dim, out_dim, key=key, rnn_type=gcm_type)
-        elif self.gcm_type == "TRANSFORMER":
+        elif self.gcm_type.lower() == "transformer":
             self.seq_model = TransformerController(lam_dim, mem_dim, latent_dim, out_dim, key=key, **kwargs)
         else:
             raise ValueError("Unsupported gcm_type. Must be 'LSTM', 'GRU', 'RNN', or 'TRANSFORMER'.")
