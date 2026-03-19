@@ -93,7 +93,7 @@ print(f"    - IDM: {count_trainable_params(model.action_model.idm)}")
 print(f"    - IDM Embeddings: {count_trainable_params(model.action_model.idm_embeddings)}")
 print(f"    - GCM : {count_trainable_params(model.action_model.gcm)}")
 print(f"    - GCM Embeddings: {count_trainable_params(model.action_model.gcm_embeddings)}")
-print(f"    - Action Bridge: {count_trainable_params(model.action_model.action_bridge)}")
+print(f"    - Action Bridge: {count_trainable_params(model.action_model.action_bridge)}", flush=True)
 
 
 try:
@@ -103,7 +103,8 @@ try:
     model = eqx.tree_at(lambda m: m.encoder, model, dummy.encoder)
     model = eqx.tree_at(lambda m: m.transition_model, model, dummy.transition_model)
     model = eqx.tree_at(lambda m: m.action_model.idm, model, dummy.action_model.idm)
-    model = eqx.tree_at(lambda m: m.action_model.idm_embeddings, model, dummy.action_model.idm_embeddings)
+    if CONFIG["discrete_actions"]:
+        model = eqx.tree_at(lambda m: m.action_model.idm_embeddings, model, dummy.action_model.idm_embeddings)
 
     print("✅ Transplanted Dynamics & Encoder weights from Phase 2")
 except Exception as e:
@@ -116,7 +117,8 @@ if not TRAIN:
 # Freeze everything EXCEPT GCM, GCM Embeddings, and Action Bridge (if it exists)
 filter_spec = jax.tree_util.tree_map(lambda _: False, model)
 gcm_mask = jax.tree_util.tree_map(eqx.is_inexact_array, model.action_model.gcm)
-gcm_embeddings_mask = jax.tree_util.tree_map(eqx.is_inexact_array, model.action_model.gcm_embeddings)
+if model.action_model.gcm_embeddings is not None:
+    gcm_embeddings_mask = jax.tree_util.tree_map(eqx.is_inexact_array, model.action_model.gcm_embeddings)
 if model.action_model.action_bridge is not None:
     action_bridge_mask = jax.tree_util.tree_map(eqx.is_inexact_array, model.action_model.action_bridge)
 
@@ -176,7 +178,7 @@ def eval_step(m, ref_videos, context_ratio=0.0):
 #%% Training Loop
 if TRAIN:
     print(f"\n🚀 Starting Phase 3: GCM Action Matching -> Saving to {run_dir}")
-    print(f"Trainable Params (GCM and co.): {count_trainable_params(diff_model)}")
+    print(f"Trainable Params (GCM and co.): {count_trainable_params(diff_model)}", flush=True)
 
     start_time = time.time()
     all_losses = []
@@ -203,6 +205,7 @@ if TRAIN:
                 ref_video=sample_batch[0], 
                 plot_ref=True, 
                 show_titles=True,
+                show_borders=True,
                 save_name=run_dir / "plots" / f"p3_epoch{epoch+1}.png",
                 save_video=False)
 
@@ -317,13 +320,14 @@ test_seq_id = np.random.randint(0, sample_vis.shape[0])
 # test_seq_id = 102
 
 print(f"\n Custom Rollout on test sequence {test_seq_id} with custom context_ratio")
-_, _, pred_video = custom_rollout(final_model, sample_vis[test_seq_id], context_ratio=0.0)
+_, _, pred_video = custom_rollout(final_model, sample_vis[test_seq_id], context_ratio=0.25)
 
 plot_videos(
     video=pred_video, 
     ref_video=sample_vis[test_seq_id], 
     plot_ref=True, 
     show_titles=True,
+    show_borders=True,
     save_name=run_dir / "plots" / f"p3_custom_ar_{i}.png",
     save_video=True
 )

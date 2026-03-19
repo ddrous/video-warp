@@ -325,11 +325,11 @@ class LatentActionModule(eqx.Module):
             # gcm_lam_dim = 1*num_actions_idm if self.translate_actions else lam_dim
             gcm_lam_dim = lam_dim
             # self.gcm = GenerativeControlModule(lam_dim, mem_dim, dyn_dim, gcm_lam_dim, key=k2, rnn_type="GRU")
-            self.gcm = GenerativeControlModule(lam_dim, mem_dim, dyn_dim, gcm_lam_dim, key=k2, gcm_type=gcm_type, max_len=12, num_heads=4, num_blocks=4)
+            self.gcm = GenerativeControlModule(lam_dim, mem_dim, dyn_dim, gcm_lam_dim, key=k2, gcm_type=gcm_type, max_len=32, num_heads=4, num_blocks=4)
         else:
             self.gcm = None
 
-        if self.gcm:
+        if self.gcm and self.discrete_actions:
             emb_weights_gcm = jnp.zeros((num_actions_gcm, gcm_lam_dim))
             if self.translate_actions:
                 self.gcm_embeddings = eqx.nn.Embedding(weight=emb_weights_gcm, key=k2)
