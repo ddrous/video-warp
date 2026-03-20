@@ -10,7 +10,7 @@ root_width: 12
 root_depth: 5
 num_fourier_freqs: 6
 use_time_in_root: false
-cnn_hidden_width: 64
+cnn_hidden_width: 128
 cnn_depth: 4
 lam_space: 16
 mem_space: 256
@@ -22,10 +22,10 @@ use_action_residuals: false
 # Phase 1: Autoencoder Pretraining
 # ==========================================
 phase_1:
-  nb_epochs: 80
+  nb_epochs: 20
   print_every: 1
-  batch_size: 128
-  learning_rate: 1.0e-4
+  batch_size: 16
+  learning_rate: 1.0e-5
   encoder_sees_test: false
   mse_weight: 0.16
   # Phase 1 LR Scheduler

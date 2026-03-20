@@ -15,6 +15,7 @@ from utils import setup_run_dir, get_coords_grid, ssim, plot_videos, count_train
 from loaders import get_dataloaders, torch
 from models import WeightCNN, RootMLP, fourier_encode
 from jax.flatten_util import ravel_pytree
+import dm_pix as pix
 
 try:
     cfg_name = sys.argv[1]
@@ -36,12 +37,25 @@ torch.manual_seed(CONFIG["seed"])
 np.random.seed(CONFIG["seed"])
 
 #%% Initialization
+
+# data_dir = CONFIG["data_path"]
+# CONFIG["data_path"] = "../../" + str(data_dir)
+
 run_dir = setup_run_dir("phase_1", CONFIG, train=TRAIN)
 
 train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_1")
 
 vis_batch = next(iter(train_loader))
 print(f"Sample batch shape: {vis_batch.shape}", flush=True)
+if hasattr(train_loader.dataset.dataset, "max_val"):
+    emp_max_val  = train_loader.dataset.dataset.max_val
+    print(f"Empirical max val in the training set: {emp_max_val:.4f}", flush=True)
+else:
+    print("WARNING. Max val not provided. Assuming data is normealised RGB pixel vals, so empirical data range is 1.0. Needed for SSIM")
+    emp_max_val = 1.0
+
+print(f"Max/min val sanity check in the sample batch: {vis_batch.max():.4f}, min value: {vis_batch.min():.4f}", flush=True)
+
 if vis_batch.ndim == 4:
     B, H, W, C = vis_batch.shape
     T = 1
@@ -93,6 +107,8 @@ def render_frame(enc, offset, coords_grid):
     pred_flat = jax.vmap(render_pt, in_axes=(None, 0))(theta, flat_coords)
     return pred_flat.reshape(H, W, -1)
 
+
+
 #%% Setup Optimiser
 optimizer = optax.chain(
     optax.adam(CONFIG["phase_1"]["learning_rate"]),
@@ -121,8 +137,16 @@ def train_step(enc, opt_state, batch_frames, coords_grid):
         reconstructed = batched_render(offsets)
 
         mse_loss = jnp.mean((reconstructed - batch_frames)**2)
-        ssim_loss = 1.0 - jnp.mean(jax.vmap(ssim)(reconstructed, batch_frames))
-        
+
+        # ssim_loss = 1.0 - jnp.mean(jax.vmap(ssim)(reconstructed, batch_frames))
+
+        # FIX 1: Use dm-pix for true local sliding-window SSIM
+        # FIX 2: Explicitly pass your data range (assuming [-1, 1] here, so range is 2.0. If [0, 1], change to 1.0)
+        def compute_single_ssim(pred, target):
+            return pix.ssim(pred, target, max_val=emp_max_val)
+
+        ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_single_ssim)(reconstructed, batch_frames))
+
         mse_w = CONFIG["phase_1"]["mse_weight"]
 
         return  mse_w * mse_loss + (1 - mse_w) * ssim_loss
@@ -183,7 +207,7 @@ if TRAIN:
 
         avg_loss = np.mean(epoch_losses)
         if (epoch+1) % (CONFIG["phase_1"]["print_every"]) == 0:
-            print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f} - LR Scale: {lr_scale:.4e}", flush=True)
+            print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f} - LR Scale: {lr_scale:.4f}", flush=True)
 
         ## Visualize reconstructions every nb_epocsh/10 epochs
         if (epoch+1) % max(1, CONFIG["phase_1"]["nb_epochs"] // 10) == 0:
@@ -192,13 +216,17 @@ if TRAIN:
             plot_videos(
                 np.expand_dims(recon, axis=1)[0] if recon.ndim == 4 else recon[0],
                 np.expand_dims(vis_batch, axis=1)[0] if vis_batch.ndim == 4 else vis_batch[0],
+                show_borders=True,
+                corner_radius=5,
+                no_rescale=False,
+                cmap="grey" if CONFIG["dataset"].lower() == "movingmnist" else "viridis",
                 plot_ref=True, show_titles=True, save_name=run_dir / "plots" / f"p1_epoch{epoch+1}.png"
             )
 
     print("\nWall time:", time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
     eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
-    eqx.tree_serialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
+    # eqx.tree_serialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
     print("✅ Saved isolated WeightCNN (with theta_base)")
 
     fig, ax = plt.subplots(figsize=(8, 4))
@@ -226,7 +254,8 @@ else:
 #%% Visualise Reconstructions
 
 print("\nVisualizing GT vs Reconstruction...")
-test_batch = next(iter(test_loader))[:5]
+# test_batch = next(iter(train_loader))[:1]
+test_batch = vis_batch[:5]
 reconstructed, mse_loss, ssim_loss = eval_step(encoder, test_batch, coords_grid)
 test_id = np.random.randint(0, test_batch.shape[0])
 print(f"    - Sample {test_id} from test set...")
@@ -236,9 +265,40 @@ print(reconstructed.shape, test_batch.shape)
 plot_videos(
     np.expand_dims(reconstructed, axis=1)[test_id] if reconstructed.ndim == 4 else reconstructed[test_id],
     np.expand_dims(test_batch, axis=1)[test_id] if test_batch.ndim == 4 else test_batch[test_id],
-    plot_ref=True, show_titles=False, save_name=run_dir / "plots" / "phase1_recons.png"
+    show_borders=True,
+    corner_radius=5,
+    no_rescale=False,
+    cmap="grey" if CONFIG["dataset"].lower() == "movingmnist" else "viridis",
+    plot_ref=True, show_titles=True, save_name=run_dir / "plots" / "phase1_recons.png"
 )
 
 
 # %% Copy nohup.log to run_dir for record keeping
 shutil.copy("nohup.log", run_dir / "nohup_p1.log")
+
+
+## if dim==4, then expand the time dimension for consistent indexing in the rest of the code
+if reconstructed.ndim == 4:
+    reconstructed = np.expand_dims(reconstructed, axis=1)
+if test_batch.ndim == 4:
+    test_batch = np.expand_dims(test_batch, axis=1)
+
+print(f"Actual values of rec vs gt (for the sample frame visualised above): \nRecon: {reconstructed[test_id, 0, :5, :5, 0]} \nGT: {test_batch[test_id, 0, :5, :5, 0]}", flush=True)
+
+## print more central pixels for the same frame, to check if the model is at least getting the general structure right
+center_h, center_w = reconstructed.shape[2] // 2, reconstructed.shape[3] // 2
+print(f"Central 5x5 patch values: \nRecon: {reconstructed[test_id, 0, center_h-2:center_h+3, center_w-2:center_w+3, 0]} \nGT: {test_batch[test_id, 0, center_h-2:center_h+3, center_w-2:center_w+3, 0]}", flush=True)
+
+
+## Imshow the two side by side for a quick visual check
+plt.figure(figsize=(10, 5))
+plt.subplot(1, 2, 1)
+plt.imshow(reconstructed[test_id, 0], cmap='viridis', vmin=-1, vmax=1)
+plt.title("Reconstructed")
+plt.axis('off') 
+
+plt.subplot(1, 2, 2)
+plt.imshow(test_batch[test_id, 0], cmap='viridis', vmin=-1, vmax=1)
+plt.title("Ground Truth")
+plt.axis('off')
+plt.suptitle("Sample Reconstruction vs Ground Truth")

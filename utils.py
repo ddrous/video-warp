@@ -31,17 +31,17 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
     dumps the config to yaml, and returns the path.
     """
 
+    ## Seriously warn the user that phase_1 should be run from the root project directory, while phase_2 and 3 from the runs/xx, directory. Use alrm emojis
+    if phase_name == "phase_1":
+        print("⚠️⚠️⚠️ WARNING: We recommend runing phase_1 from the root project directory ⚠️⚠️⚠️", flush=True)
+    else:
+        print(f"⚠️⚠️⚠️ WARNING: We recommend running {phase_name} from the run directory created by phase_1 ⚠️⚠️⚠️", flush=True)
+
     ## If phase 2 or 3, do nothing, return ./
     # if not train or phase_name in ["phase_2", "phase_3"]:
-    if phase_name in ["phase_2", "phase_3"]:
-        data_dir = Path(config["data_path"])
-        # if data_dir.parent.parent.exists():
-        #     config["data_path"] = str(data_dir.parent.parent)
-        # else:
-        #     print(f"Warning: Could not find parent directory for {data_dir}. Keeping original path.")
-
-        # data_dir = "../../data"
-        config["data_path"] = "../../" + str(data_dir.name)
+    if not train:
+        # data_dir = Path(config["data_path"])
+        # config["data_path"] = "../../" + str(data_dir.name)
 
         run_path = Path("./")
 
@@ -56,7 +56,13 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
         (run_path / "plots").mkdir(exist_ok=True)
         
         with open(run_path / "config.yaml", 'w') as f:
-            yaml.dump(config, f, default_flow_style=False)
+            # yaml.dump(config, f, default_flow_style=False)
+
+            ## While dumping the config, set the data_path to ../../old_data_path
+            config_to_dump = config.copy()
+            if "data_path" in config_to_dump:
+                data_dir = Path(config_to_dump["data_path"])
+                config_to_dump["data_path"] = "../../" + str(data_dir.name)
 
         # 1. Handle current_script but ignore ipykernel_launcher
         current_script = Path(sys.argv[0])
@@ -104,19 +110,19 @@ def ssim(x, y, data_range=1.0):
 
 
 
-
 def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_labels=True, forecast_start=None, 
                 vmin=None, vmax=None, save_name=None, 
-                wspace=0.05, hspace=0.05, forecast_gap=0.2, 
+                wspace=0.05, hspace=0.02, forecast_gap=0.2, 
                 save_video=False, video_gap=5, show_borders=False, corner_radius=5,
-                no_rescale=False, cmap='viridis'):
+                no_rescale=False, cmap='viridis', row_height="auto"):
     """
     Plots a camera-ready rollout of ground truth and predicted video frames.
     
     Args:
         show_borders (bool): If True, applies rounded borders to the frames.
         corner_radius (int): The radius of the rounded corners (if show_borders=True).
-        cmap (str): Matplotlib colormap name to use for single-channel data (e.g. 'viridis', 'coolwarm').
+        cmap (str): Matplotlib colormap name to use for single-channel data.
+        row_height (str or float): "auto" dynamically calculates height to prevent letterboxing.
     """
     with plt.rc_context({
         'font.family': 'sans-serif',
@@ -152,8 +158,23 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             spacer_col = forecast_start - 1
             width_ratios[spacer_col] = forecast_gap
 
+        # Base width calculation
         fig_width = (nb_frames + (forecast_gap if has_gap else 0.0)) * 1.5
-        fig = plt.figure(figsize=(fig_width, nrows * 1.55))
+        
+        # --- THE FIX: DYNAMIC ASPECT RATIO SCALING ---
+        if row_height == "auto":
+            H, W = video.shape[1:3]
+            aspect = H / W
+            # Shrink-wrap the row height perfectly to the image aspect ratio
+            calculated_row_height = aspect * 1.2 if show_titles else aspect*1.5
+            # Add a small buffer for the titles so they don't get cropped
+            title_buffer = 0.5 if show_titles else 0.1
+            fig_height = (nrows * calculated_row_height) + title_buffer
+        else:
+            fig_height = nrows * float(row_height)
+        # ---------------------------------------------
+        
+        fig = plt.figure(figsize=(fig_width, fig_height))
         
         gs = fig.add_gridspec(nrows, ncols, wspace=wspace, hspace=hspace, width_ratios=width_ratios)
         axes = np.empty((nrows, ncols), dtype=object)
@@ -161,10 +182,22 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             for c in range(ncols):
                 axes[r, c] = fig.add_subplot(gs[r, c])
 
-        # Always build imshow_kwargs with the cmap; vmin/vmax applied unconditionally
+        if vmin is None or vmax is None:
+            # Gather all the data we are going to plot to find the absolute bounds
+            if plot_ref:
+                global_min = min(video.min(), ref_video.min())
+                global_max = max(video.max(), ref_video.max())
+            else:
+                global_min = video.min()
+                global_max = video.max()
+
+            # Assign them so imshow_kwargs uses them for every frame
+            if vmin is None: vmin = global_min
+            if vmax is None: vmax = global_max
+
         imshow_kwargs = {'cmap': cmap}
-        if vmin is not None: imshow_kwargs['vmin'] = vmin
-        if vmax is not None: imshow_kwargs['vmax'] = vmax
+        imshow_kwargs['vmin'] = vmin
+        imshow_kwargs['vmax'] = vmax
 
         frame_idx = 0
         for c in range(ncols):
@@ -179,7 +212,6 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             if plot_ref or (vmin is None and vmax is None):
                 pred_frame = np.clip(pred_frame, 0.0, 1.0)
             
-            # Squeeze single-channel dim so matplotlib respects the cmap
             if pred_frame.shape[-1] == 1:
                 pred_frame = pred_frame[..., 0]
 
@@ -188,11 +220,9 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 ref_frame = ref_video[ref_idx]
                 if rescale: ref_frame = (ref_frame + 1.0) / 2.0
                 ref_frame = np.clip(ref_frame, 0.0, 1.0)
-                # Squeeze single-channel dim so matplotlib respects the cmap
                 if ref_frame.shape[-1] == 1:
                     ref_frame = ref_frame[..., 0]
 
-            # Pass imshow_kwargs in both branches
             if plot_ref:
                 im_ref  = axes[0, c].imshow(ref_frame,  **imshow_kwargs)
                 im_pred = axes[1, c].imshow(pred_frame, **imshow_kwargs)
@@ -205,7 +235,6 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 ax.set_xticks([])
                 ax.set_yticks([])
                 
-                # frame_data may now be (H, W) after squeeze, handle both cases
                 h, w = frame_data.shape[:2]
                 
                 for spine in ax.spines.values():
@@ -266,44 +295,32 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                     font = ImageFont.load_default()
 
             def process_pil_image(img_array, radius=corner_radius, apply_frame=show_borders):
-                """Helper to conditionally apply rounded corners and a border."""
                 h, w = img_array.shape[:2]
                 img = Image.fromarray((img_array * 255).astype(np.uint8))
-                
-                if not apply_frame:
-                    return img
-                
+                if not apply_frame: return img
                 mask = Image.new("L", (w, h), 0)
                 draw = ImageDraw.Draw(mask)
                 draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
-                
                 rounded_img = Image.new("RGB", (w, h), "white")
                 rounded_img.paste(img, (0, 0), mask=mask)
-                
                 draw_border = ImageDraw.Draw(rounded_img)
                 draw_border.rounded_rectangle((0, 0, w-1, h-1), radius=radius, outline="black", width=1)
-                
                 return rounded_img
 
             def apply_cmap_to_frame(frame):
-                """Convert a (H, W, 1) or (H, W) float frame to an RGB array via the chosen cmap."""
-                if frame.ndim == 3 and frame.shape[-1] == 1:
-                    frame = frame[..., 0]
+                if frame.ndim == 3 and frame.shape[-1] == 1: frame = frame[..., 0]
                 colormap = plt.get_cmap(cmap)
-                return colormap(frame)[..., :3]  # Drop alpha, keep RGB as float
+                return colormap(frame)[..., :3]
 
             gif_frames = []
             for t in range(nb_frames):
                 p_f = video[t]
                 if rescale: p_f = (p_f + 1.0) / 2.0
-                
                 if not plot_ref and (vmin is not None or vmax is not None):
                     v_min = vmin if vmin is not None else p_f.min()
                     v_max = vmax if vmax is not None else p_f.max()
                     p_f = (p_f - v_min) / (v_max - v_min + 1e-8)
-                
                 p_f = np.clip(p_f, 0.0, 1.0)
-                # Apply cmap instead of repeating the channel
                 p_f = apply_cmap_to_frame(p_f)
 
                 if plot_ref:
@@ -311,7 +328,6 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                     r_f = ref_video[r_idx]
                     if rescale: r_f = (r_f + 1.0) / 2.0
                     r_f = np.clip(r_f, 0.0, 1.0)
-                    # Apply cmap instead of repeating the channel
                     r_f = apply_cmap_to_frame(r_f)
                     
                     img_ref  = process_pil_image(r_f)
@@ -320,7 +336,6 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                     combined_w = img_ref.width + video_gap + img_pred.width
                     combined_h = max(img_ref.height, img_pred.height)
                     combined_frame = Image.new('RGB', (combined_w, combined_h), 'white')
-                    
                     combined_frame.paste(img_ref,  (0, 0))
                     combined_frame.paste(img_pred, (img_ref.width + video_gap, 0))
                 else:
@@ -334,17 +349,15 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 if plot_ref:
                     gt_w   = r_f.shape[1]
                     pred_w = p_f.shape[1]
-                    draw.text((gt_w // 2 - 10, 2),                          "GT",   font=font, fill="black")
-                    draw.text((gt_w + video_gap + pred_w // 2 - 17, 2),     "Pred", font=font, fill="black")
+                    draw.text((gt_w // 2 - 10, 2), "GT", font=font, fill="black")
+                    draw.text((gt_w + video_gap + pred_w // 2 - 17, 2), "Pred", font=font, fill="black")
                 else:
                     draw.text((p_f.shape[1] // 2 - 17, 2), "Pred", font=font, fill="black")
                 
                 gif_frames.append(final_img)
             
             gif_path = Path(save_name).with_suffix('.gif')
-            gif_frames[0].save(
-                gif_path, save_all=True, append_images=gif_frames[1:], duration=150, loop=0
-            )
+            gif_frames[0].save(gif_path, save_all=True, append_images=gif_frames[1:], duration=150, loop=0)
             print(f"Saved rollout animation to {gif_path}")
 
             try:

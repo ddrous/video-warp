@@ -28,13 +28,17 @@ def numpy_collate(batch):
         videos = np.transpose(videos, (0, 1, 3, 4, 2))
 
     videos = videos.astype(np.float32)
-    if videos.max() > 2.0:
-        videos = videos / 255.0
+    # if videos.max() > 2.0:
+    #     videos = videos / 255.0
+
     return videos
 
 class MiniGridDataset(Dataset):
     def __init__(self, data_array):
         self.data_array = data_array
+        if self.data_array.max() > 2.0:
+            self.data_array = self.data_array / 255.0
+        self.max_val = self.data_array.max()
     def __len__(self):
         return self.data_array.shape[0]
     def __getitem__(self, idx):
@@ -44,6 +48,9 @@ class MiniGridDataset(Dataset):
 class MovingMNISTDataset(Dataset):
     def __init__(self, data_array):
         self.data_array = data_array
+        if self.data_array.max() > 2.0:
+            self.data_array = self.data_array / 255.0
+        self.max_val = self.data_array.max()
     def __len__(self):
         return self.data_array.shape[1]
     def __getitem__(self, idx):
@@ -54,6 +61,9 @@ class MovingMNISTDataset(Dataset):
 class FrameDataset(Dataset):
     def __init__(self, data_array):
         self.data_array = data_array
+        if self.data_array.max() > 2.0:
+            self.data_array = self.data_array / 255.0
+        self.max_val = self.data_array.max()
     def __len__(self):
         return self.data_array.shape[0]
     def __getitem__(self, idx):
@@ -98,6 +108,8 @@ class WeatherBenchTemperature(Dataset):
             
         norm_data = (raw_data - self.mean) / self.std
         self.data = np.expand_dims(norm_data, axis=1).astype(np.float32)
+
+        self.max_val = self.data.max()
 
     def _download_and_extract(self):
         if len(glob.glob(os.path.join(self.data_path, "*.nc"))) > 0: return
@@ -156,6 +168,9 @@ class PhyWorldDataset(Dataset):
         ## Downsample the frames to 128 x 128 to reduce memory
         frames = frames[:, ::2, ::2, :]
 
+        if frames.max() > 2.0:
+            frames = frames / 255.0
+
         return torch.from_numpy(frames.astype(np.float32))
 
 def get_dataloaders(config, phase="phase_1"):
@@ -211,14 +226,14 @@ def get_dataloaders(config, phase="phase_1"):
         test_dataset = WeatherBenchTemperature(data_path=f"{data_path}/WeatherBench/2m_temperature/", split="test", mean=dataset.mean, std=dataset.std)
         if is_phase1:
             # raise NotImplementedError("Phase 1 Frame Extraction for WeatherBench is custom.")
-            print("⚠️ Phase 1 Frame Extraction not implemented. Time dimension will be falttened during training. Could cause issues!")
+            print("⚠️ Phase 1 frame by frame extraction not implemented. Time dimension will be flattened during training. Could cause issues!")
 
     elif dataset_name.lower() == "phyworld":
         dataset = PhyWorldDataset(f"{data_path}/PhyWorld/collision_30K.hdf5", seq_len=32)
         test_dataset = PhyWorldDataset(f"{data_path}/PhyWorld/collision_eval.hdf5", seq_len=32)
         if is_phase1:
             # raise NotImplementedError("Phase 1 Frame Extraction for PhyWorld is custom.")
-            print("⚠️ Phase 1 Frame Extraction not implemented. Time dimension will be falttened during training. Could cause issues!")
+            print("⚠️ Phase 1 frame by frame extraction not implemented. Time dimension will be flattened during training. Could cause issues!")
             
     else:
         raise ValueError(f"Unknown dataset: {dataset_name}")
