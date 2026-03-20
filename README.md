@@ -29,9 +29,9 @@ To switch between Continuous and Discrete setups, modify the `dataset` and `disc
 
 The modules run sequentially:
 
-1. **Pre-train Encoder** (from the root directory)
+1. **Pre-train Encoder** (from the root directory). To skip encoder training, set `pretrain_encoder: False` in the config, and toggle TRAIN=False in the phase1.py script.
    ```bash
-   python phase1.py
+   python phase1.py cfgs/config.yaml
     ```
 2. **Fit Dynamics**  (from the generated run directory, e.g., `runs/230101-123456/`)
    ```bash

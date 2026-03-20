@@ -227,6 +227,7 @@ if TRAIN:
 
     ## Save the array as well
     np.save(run_dir / "artefacts" / "p3_loss.npy", np.array(all_losses))
+    np.save(run_dir / "artefacts" / "p3_lr_scales.npy", np.array(lr_scales))
 
 else:
     final_model = model

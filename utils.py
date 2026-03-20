@@ -32,7 +32,8 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
     """
 
     ## If phase 2 or 3, do nothing, return ./
-    if not train or phase_name in ["phase_2", "phase_3"]:
+    # if not train or phase_name in ["phase_2", "phase_3"]:
+    if phase_name in ["phase_2", "phase_3"]:
         data_dir = Path(config["data_path"])
         # if data_dir.parent.parent.exists():
         #     config["data_path"] = str(data_dir.parent.parent)
@@ -45,7 +46,8 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
         run_path = Path("./")
 
     # if train:
-    if train and phase_name not in ["phase_2", "phase_3"]:
+    # if train and phase_name not in ["phase_2", "phase_3"]:
+    else:
         timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
         run_path = Path(base_dir) / timestamp
         run_path.mkdir(parents=True, exist_ok=True)
@@ -101,16 +103,20 @@ def ssim(x, y, data_range=1.0):
     return ssim_numerator / ssim_denominator
 
 
+
+
 def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_labels=True, forecast_start=None, 
                 vmin=None, vmax=None, save_name=None, 
                 wspace=0.05, hspace=0.05, forecast_gap=0.2, 
-                save_video=False, video_gap=5, show_borders=False, corner_radius=5):
+                save_video=False, video_gap=5, show_borders=False, corner_radius=5,
+                no_rescale=False, cmap='viridis'):
     """
     Plots a camera-ready rollout of ground truth and predicted video frames.
     
     Args:
         show_borders (bool): If True, applies rounded borders to the frames.
         corner_radius (int): The radius of the rounded corners (if show_borders=True).
+        cmap (str): Matplotlib colormap name to use for single-channel data (e.g. 'viridis', 'coolwarm').
     """
     with plt.rc_context({
         'font.family': 'sans-serif',
@@ -132,6 +138,9 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             ref_video = (ref_video + 1.0) / 2.0
         elif not plot_ref and video.min() < -0.5:
             rescale = True
+        
+        if no_rescale:
+            rescale = False
 
         nrows = 2 if plot_ref else 1
         has_gap = forecast_start is not None and 1 < forecast_start <= nb_frames
@@ -152,10 +161,10 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             for c in range(ncols):
                 axes[r, c] = fig.add_subplot(gs[r, c])
 
-        imshow_kwargs = {}
-        if not plot_ref:
-            if vmin is not None: imshow_kwargs['vmin'] = vmin
-            if vmax is not None: imshow_kwargs['vmax'] = vmax
+        # Always build imshow_kwargs with the cmap; vmin/vmax applied unconditionally
+        imshow_kwargs = {'cmap': cmap}
+        if vmin is not None: imshow_kwargs['vmin'] = vmin
+        if vmax is not None: imshow_kwargs['vmax'] = vmax
 
         frame_idx = 0
         for c in range(ncols):
@@ -170,19 +179,23 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             if plot_ref or (vmin is None and vmax is None):
                 pred_frame = np.clip(pred_frame, 0.0, 1.0)
             
-            if pred_frame.shape[-1] == 1: pred_frame = np.repeat(pred_frame, 3, axis=-1)
+            # Squeeze single-channel dim so matplotlib respects the cmap
+            if pred_frame.shape[-1] == 1:
+                pred_frame = pred_frame[..., 0]
 
             if plot_ref:
                 ref_idx = min(frame_idx, ref_video.shape[0] - 1)
                 ref_frame = ref_video[ref_idx]
                 if rescale: ref_frame = (ref_frame + 1.0) / 2.0
                 ref_frame = np.clip(ref_frame, 0.0, 1.0)
-                if ref_frame.shape[-1] == 1: ref_frame = np.repeat(ref_frame, 3, axis=-1)
+                # Squeeze single-channel dim so matplotlib respects the cmap
+                if ref_frame.shape[-1] == 1:
+                    ref_frame = ref_frame[..., 0]
 
-            # Capture the imshow objects so we can apply clip_path
+            # Pass imshow_kwargs in both branches
             if plot_ref:
-                im_ref = axes[0, c].imshow(ref_frame)
-                im_pred = axes[1, c].imshow(pred_frame)
+                im_ref  = axes[0, c].imshow(ref_frame,  **imshow_kwargs)
+                im_pred = axes[1, c].imshow(pred_frame, **imshow_kwargs)
                 target_axes = [(axes[0, c], im_ref, ref_frame), (axes[1, c], im_pred, pred_frame)]
             else:
                 im_pred = axes[0, c].imshow(pred_frame, **imshow_kwargs)
@@ -192,13 +205,12 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 ax.set_xticks([])
                 ax.set_yticks([])
                 
+                # frame_data may now be (H, W) after squeeze, handle both cases
                 h, w = frame_data.shape[:2]
                 
-                # Turn off default square spines
                 for spine in ax.spines.values():
                     spine.set_visible(False)
                     
-                # Conditionally apply the rounded border and clipping
                 if show_borders:
                     rect = patches.FancyBboxPatch(
                         (-0.5, -0.5), w, h,
@@ -223,7 +235,7 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
 
         if show_labels:
             if plot_ref:
-                axes[0, 0].set_ylabel("GT", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
+                axes[0, 0].set_ylabel("GT",   rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
                 axes[1, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
             else:
                 axes[0, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
@@ -254,27 +266,31 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                     font = ImageFont.load_default()
 
             def process_pil_image(img_array, radius=corner_radius, apply_frame=show_borders):
-                """Helper function to conditionally apply rounded corners and a border."""
+                """Helper to conditionally apply rounded corners and a border."""
                 h, w = img_array.shape[:2]
                 img = Image.fromarray((img_array * 255).astype(np.uint8))
                 
                 if not apply_frame:
                     return img
                 
-                # Create a rounded mask
                 mask = Image.new("L", (w, h), 0)
                 draw = ImageDraw.Draw(mask)
                 draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
                 
-                # Paste the frame using the mask onto a white background
                 rounded_img = Image.new("RGB", (w, h), "white")
                 rounded_img.paste(img, (0, 0), mask=mask)
                 
-                # Draw the bounding frame border
                 draw_border = ImageDraw.Draw(rounded_img)
                 draw_border.rounded_rectangle((0, 0, w-1, h-1), radius=radius, outline="black", width=1)
                 
                 return rounded_img
+
+            def apply_cmap_to_frame(frame):
+                """Convert a (H, W, 1) or (H, W) float frame to an RGB array via the chosen cmap."""
+                if frame.ndim == 3 and frame.shape[-1] == 1:
+                    frame = frame[..., 0]
+                colormap = plt.get_cmap(cmap)
+                return colormap(frame)[..., :3]  # Drop alpha, keep RGB as float
 
             gif_frames = []
             for t in range(nb_frames):
@@ -287,26 +303,25 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                     p_f = (p_f - v_min) / (v_max - v_min + 1e-8)
                 
                 p_f = np.clip(p_f, 0.0, 1.0)
-                if p_f.shape[-1] == 1: p_f = np.repeat(p_f, 3, axis=-1)
+                # Apply cmap instead of repeating the channel
+                p_f = apply_cmap_to_frame(p_f)
 
                 if plot_ref:
                     r_idx = min(t, ref_video.shape[0] - 1)
                     r_f = ref_video[r_idx]
                     if rescale: r_f = (r_f + 1.0) / 2.0
                     r_f = np.clip(r_f, 0.0, 1.0)
-                    if r_f.shape[-1] == 1: r_f = np.repeat(r_f, 3, axis=-1)
+                    # Apply cmap instead of repeating the channel
+                    r_f = apply_cmap_to_frame(r_f)
                     
-                    # Apply styling to individual frames conditionally
-                    img_ref = process_pil_image(r_f)
+                    img_ref  = process_pil_image(r_f)
                     img_pred = process_pil_image(p_f)
                     
-                    # Create canvas for both
                     combined_w = img_ref.width + video_gap + img_pred.width
                     combined_h = max(img_ref.height, img_pred.height)
                     combined_frame = Image.new('RGB', (combined_w, combined_h), 'white')
                     
-                    # Paste them side-by-side
-                    combined_frame.paste(img_ref, (0, 0))
+                    combined_frame.paste(img_ref,  (0, 0))
                     combined_frame.paste(img_pred, (img_ref.width + video_gap, 0))
                 else:
                     combined_frame = process_pil_image(p_f)
@@ -317,10 +332,10 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 
                 draw = ImageDraw.Draw(final_img)
                 if plot_ref:
-                    gt_w = r_f.shape[1]
+                    gt_w   = r_f.shape[1]
                     pred_w = p_f.shape[1]
-                    draw.text((gt_w // 2 - 10, 2), "GT", font=font, fill="black")
-                    draw.text((gt_w + video_gap + pred_w // 2 - 17, 2), "Pred", font=font, fill="black")
+                    draw.text((gt_w // 2 - 10, 2),                          "GT",   font=font, fill="black")
+                    draw.text((gt_w + video_gap + pred_w // 2 - 17, 2),     "Pred", font=font, fill="black")
                 else:
                     draw.text((p_f.shape[1] // 2 - 17, 2), "Pred", font=font, fill="black")
                 

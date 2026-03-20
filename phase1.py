@@ -28,7 +28,7 @@ except Exception as e:
     except Exception as e:
         raise Exception(f"Error: Could not load config.yaml. ({e})")
 
-TRAIN = False
+TRAIN = True
 DEBUG = CONFIG.get("debug", False)
 
 key = jax.random.PRNGKey(CONFIG["seed"])
@@ -40,7 +40,7 @@ run_dir = setup_run_dir("phase_1", CONFIG, train=TRAIN)
 
 train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_1")
 
-vis_batch = next(iter(train_loader))[:2]
+vis_batch = next(iter(train_loader))
 print(f"Sample batch shape: {vis_batch.shape}", flush=True)
 if vis_batch.ndim == 4:
     B, H, W, C = vis_batch.shape
@@ -169,6 +169,7 @@ if TRAIN:
     print(f"\n🚀 Starting Phase 1: Encoder Pretraining -> Saving to {run_dir}")
     start_time = time.time()
     epoch_losses_all = []
+    lr_scales = []
 
     for epoch in range(CONFIG["phase_1"]["nb_epochs"]):
         epoch_losses = []
@@ -177,9 +178,12 @@ if TRAIN:
             epoch_losses.append(loss)
             epoch_losses_all.append(loss)
 
+            lr_scale = optax.tree_utils.tree_get(opt_state, "scale")
+            lr_scales.append(lr_scale)
+
         avg_loss = np.mean(epoch_losses)
         if (epoch+1) % (CONFIG["phase_1"]["print_every"]) == 0:
-            print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f}", flush=True)
+            print(f"Epoch {epoch+1}/{CONFIG["phase_1"]['nb_epochs']} - Avg Loss: {avg_loss:.6f} - LR Scale: {lr_scale:.4e}", flush=True)
 
         ## Visualize reconstructions every nb_epocsh/10 epochs
         if (epoch+1) % max(1, CONFIG["phase_1"]["nb_epochs"] // 10) == 0:
@@ -208,12 +212,16 @@ if TRAIN:
 
     ## Save the array as well
     np.save(run_dir / "artefacts" / "p1_loss.npy", np.array(epoch_losses_all))
+    np.save(run_dir / "artefacts" / "p1_lr_scales.npy", np.array(lr_scales))
 
 else:
     ## Print Warning
-    print("⚠️ TRAIN is set to False. Loading encoder and visualizing reconstructions only.")
-    encoder = eqx.tree_deserialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
-    eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
+    print("⚠️ TRAIN is set to False. Attempting to load encoder and visualizing reconstructions only.")
+    try:
+        encoder = eqx.tree_deserialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
+        eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
+    except FileNotFoundError as e:
+        print(f"⚠️ Could not find pretrained encoder. Continuing with untrained. ({e})")
 
 #%% Visualise Reconstructions
 

@@ -22,7 +22,7 @@ try:
 except Exception as e:
     raise Exception(f"Error: Could not load config.yaml. ({e})")
 
-TRAIN = False
+TRAIN = True
 DEBUG = CONFIG.get("debug", False)
 
 key = jax.random.PRNGKey(CONFIG["seed"])
@@ -263,6 +263,7 @@ if TRAIN:
 
     ## Save the array as well
     np.save(run_dir / "artefacts" / "p2_loss.npy", np.array(all_losses))
+    np.save(run_dir / "artefacts" / "p2_lr_scales.npy", np.array(lr_scales))
 
 else:
     # Just in case TRAIN is false, make sure model is unified

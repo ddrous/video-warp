@@ -206,8 +206,9 @@ def get_dataloaders(config, phase="phase_1"):
             test_dataset = MovingMNISTDataset(test_arrays)
             
     elif dataset_name.lower() == "weatherbench":
-        dataset = WeatherBenchTemperature(data_path=f"{data_path}/WeatherBench", split="train")
-        test_dataset = WeatherBenchTemperature(data_path=f"{data_path}/WeatherBench", split="val", mean=dataset.mean, std=dataset.std)
+        # print("final data folder is: ", f"{data_path}/WeatherBench/2m_temperature/")
+        dataset = WeatherBenchTemperature(data_path=f"{data_path}/WeatherBench/2m_temperature/", split="train")
+        test_dataset = WeatherBenchTemperature(data_path=f"{data_path}/WeatherBench/2m_temperature/", split="test", mean=dataset.mean, std=dataset.std)
         if is_phase1:
             # raise NotImplementedError("Phase 1 Frame Extraction for WeatherBench is custom.")
             print("⚠️ Phase 1 Frame Extraction not implemented. Time dimension will be falttened during training. Could cause issues!")

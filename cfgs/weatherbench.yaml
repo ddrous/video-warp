@@ -10,9 +10,9 @@ root_width: 12
 root_depth: 5
 num_fourier_freqs: 6
 use_time_in_root: false
-cnn_hidden_width: 32
+cnn_hidden_width: 64
 cnn_depth: 4
-lam_space: 32
+lam_space: 16
 mem_space: 256
 split_forward: true
 discrete_actions: false
@@ -22,58 +22,58 @@ use_action_residuals: false
 # Phase 1: Autoencoder Pretraining
 # ==========================================
 phase_1:
-  nb_epochs: 10
+  nb_epochs: 80
   print_every: 1
-  batch_size: 16
-  learning_rate: 1.0e-5
-  encoder_sees_test: True
+  batch_size: 128
+  learning_rate: 1.0e-4
+  encoder_sees_test: false
   mse_weight: 0.16
   # Phase 1 LR Scheduler
-  lr_patience: 50
+  lr_patience: 500
   lr_factor: 0.5
   lr_cooldown: 20
   lr_rtol: 1.0e-4
   lr_accum_size: 5
-  lr_min_scale: 1.0e-0
+  lr_min_scale: 1.0e-1
 
 # ==========================================
 # Phase 2: Dynamics Fitting (IDM + FDM)
 # ==========================================
 phase_2:
-  nb_epochs: 100
+  nb_epochs: 80
   print_every: 1
-  batch_size: 64
+  batch_size: 128
   learning_rate: 1.0e-4
   loss_type: "latent"  # Options: "latent" or "pixel"
   mse_weight: 0.16     # Only used if loss_type is "pixel"
   num_actions: 5
-  train_encoder: true
+  train_encoder: false
   # Phase 2 Augmentations
-  reverse_video_aug: true
-  static_video_aug: true
+  reverse_video_aug: false
+  static_video_aug: false
   # Phase 2 LR Scheduler
-  lr_patience: 300
+  lr_patience: 500
   lr_factor: 0.5
   lr_cooldown: 100
   lr_rtol: 1.0e-4
   lr_accum_size: 5
-  lr_min_scale: 1.0e-0
+  lr_min_scale: 1.0e-1
 
 # ==========================================
 # Phase 3: Generative Control (GCM)
 # ==========================================
 phase_3:
-  nb_epochs: 100
+  nb_epochs: 80
   print_every: 1
-  batch_size: 64
+  batch_size: 128
   learning_rate: 1.0e-4
   loss_type: "L2"      # Options: "L1" or "L2"
   num_actions: 5
   gcm_type: "transformer"
   # Phase 3 LR Scheduler
-  lr_patience: 300
+  lr_patience: 500
   lr_factor: 0.5
   lr_cooldown: 100
   lr_rtol: 1.0e-4
   lr_accum_size: 5
-  lr_min_scale: 1.0e-0
+  lr_min_scale: 1.0e-1
