@@ -29,3 +29,5 @@ latent_action_models/nohup.log
 *.eqx
 
 .vscode/*
+
+!runs/README.md

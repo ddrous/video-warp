@@ -25,13 +25,6 @@ To switch between Continuous and Discrete setups, modify the `dataset` and `disc
 
 **Debugging:** You can toggle `debug: True` in `config.yaml` to run a tiny 2-sample batch for rapid pipeline testing.
 
-## Trained Models
-The following folders will be made available for each dataset, containing trained models, logs, and plots used in the paper:
-* **MiniGrid**: `runs/260316-202801-PerfectMiniGrid*`
-* **MovingMNIST**: `runs/260312-113749-PerfectMNIST*`
-* **WeatherBench**: `runs/260321-013009-WeatherBench*`
-* **PhyWorld**: `runs/260318-174150-PhyWorld*`
-
 ## Execution Order
 
 The modules run sequentially:
@@ -49,6 +42,9 @@ The modules run sequentially:
    nohup python phase3.py > nohup.log
    ```
 
-## Metrics & Visualization
-* **SSIM**: Evaluates the structural similarity between predicted and ground truth frames.
-* **MSE**: Measures pixel-wise or latent space mean squared error.
+## Trained Models
+The following folders will be made available for each dataset, containing trained models, logs, and plots used in the paper:
+* **MiniGrid**: `runs/260316-202801-PerfectMiniGrid*`
+* **MovingMNIST**: `runs/260312-113749-PerfectMNIST*`
+* **WeatherBench**: `runs/260321-013009-WeatherBench*`
+* **PhyWorld**: `runs/260318-174150-PhyWorld*`
