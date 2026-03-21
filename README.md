@@ -42,7 +42,7 @@ The modules run sequentially:
    nohup python phase3.py > nohup.log
    ```
 
-## Trained Models
+## Trained Models (TODO: Add links to trained models)
 The following folders will be made available for each dataset, containing trained models, logs, and plots used in the paper:
 * **MiniGrid**: `runs/260316-202801-PerfectMiniGrid*`
 * **MovingMNIST**: `runs/260312-113749-PerfectMNIST*`
