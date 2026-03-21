@@ -8,7 +8,6 @@ import h5py
 import tempfile
 import cv2
 import xarray as xr
-import matplotlib.pyplot as plt
 
 def numpy_collate(batch):
     """Collates a list of numpy arrays into a batched numpy array for Jax."""

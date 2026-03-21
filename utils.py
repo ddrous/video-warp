@@ -1,4 +1,3 @@
-import os
 import shutil
 import datetime
 import yaml
@@ -63,6 +62,7 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
             if "data_path" in config_to_dump:
                 data_dir = Path(config_to_dump["data_path"])
                 config_to_dump["data_path"] = "../../" + str(data_dir.name)
+            yaml.dump(config_to_dump, f, default_flow_style=False)
 
         # 1. Handle current_script but ignore ipykernel_launcher
         current_script = Path(sys.argv[0])
@@ -91,22 +91,6 @@ def get_coords_grid(H, W):
     x_coords = jnp.linspace(-1, 1, W)
     X_grid, Y_grid = jnp.meshgrid(x_coords, y_coords)
     return jnp.stack([X_grid, Y_grid], axis=-1)
-
-def ssim(x, y, data_range=1.0):
-    """Computes Structural Similarity Index Measure between two batched images."""
-    C1 = (0.01 * data_range) ** 2
-    C2 = (0.03 * data_range) ** 2
-
-    mu_x = jnp.mean(x)
-    mu_y = jnp.mean(y)
-    sigma_x = jnp.var(x)
-    sigma_y = jnp.var(y)
-    sigma_xy = jnp.mean((x - mu_x) * (y - mu_y))
-
-    ssim_numerator = (2 * mu_x * mu_y + C1) * (2 * sigma_xy + C2)
-    ssim_denominator = (mu_x**2 + mu_y**2 + C1) * (sigma_x + sigma_y + C2)
-
-    return ssim_numerator / ssim_denominator
 
 
 
@@ -183,15 +167,15 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 axes[r, c] = fig.add_subplot(gs[r, c])
 
         if vmin is None or vmax is None:
-            # Gather all the data we are going to plot to find the absolute bounds
             if plot_ref:
-                global_min = min(video.min(), ref_video.min())
-                global_max = max(video.max(), ref_video.max())
+                # global_min = min(video.min(), ref_video.min())
+                # global_max = max(video.max(), ref_video.max())
+                global_min = ref_video.min()
+                global_max = ref_video.max()
             else:
                 global_min = video.min()
                 global_max = video.max()
 
-            # Assign them so imshow_kwargs uses them for every frame
             if vmin is None: vmin = global_min
             if vmax is None: vmax = global_max
 

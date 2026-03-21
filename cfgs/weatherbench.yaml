@@ -22,9 +22,9 @@ use_action_residuals: false
 # Phase 1: Autoencoder Pretraining
 # ==========================================
 phase_1:
-  nb_epochs: 20
+  nb_epochs: 5
   print_every: 1
-  batch_size: 16
+  batch_size: 8
   learning_rate: 1.0e-5
   encoder_sees_test: false
   mse_weight: 0.16
@@ -34,13 +34,13 @@ phase_1:
   lr_cooldown: 20
   lr_rtol: 1.0e-4
   lr_accum_size: 5
-  lr_min_scale: 1.0e-1
+  lr_min_scale: 1.0e-0
 
 # ==========================================
 # Phase 2: Dynamics Fitting (IDM + FDM)
 # ==========================================
 phase_2:
-  nb_epochs: 80
+  nb_epochs: 50
   print_every: 1
   batch_size: 128
   learning_rate: 1.0e-4
@@ -57,7 +57,7 @@ phase_2:
   lr_cooldown: 100
   lr_rtol: 1.0e-4
   lr_accum_size: 5
-  lr_min_scale: 1.0e-1
+  lr_min_scale: 1.0e-0
 
 # ==========================================
 # Phase 3: Generative Control (GCM)
@@ -76,4 +76,4 @@ phase_3:
   lr_cooldown: 100
   lr_rtol: 1.0e-4
   lr_accum_size: 5
-  lr_min_scale: 1.0e-1
+  lr_min_scale: 1.0e-0

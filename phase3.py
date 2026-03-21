@@ -7,12 +7,9 @@ import time
 import numpy as np
 import yaml
 import matplotlib.pyplot as plt
-import seaborn as sns
-import sys
-import shutil
-import torch
+import os
 
-from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params
+from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params, torch
 from loaders import get_dataloaders
 from models import VWARP
 
@@ -215,22 +212,34 @@ if TRAIN:
     eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_phase3.eqx", final_model)
     print("✅ Saved Phase 3 Model")
 
-    ## Plot and save loss curve as p3_loss.png
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(all_losses, label='Loss')
-    ax.set_xlabel('Train Step')
-    ax.set_ylabel('Loss')
-    ax.set_yscale('log')
-    ax.set_title('Phase 3 Training Loss')
-    plt.draw()
-    plt.savefig(run_dir / "plots" / "p3_loss.png")
-
     ## Save the array as well
     np.save(run_dir / "artefacts" / "p3_loss.npy", np.array(all_losses))
     np.save(run_dir / "artefacts" / "p3_lr_scales.npy", np.array(lr_scales))
 
 else:
     final_model = model
+
+    try:
+        all_losses = np.load(run_dir / "artefacts" / "p3_loss.npy")
+        lr_scales = np.load(run_dir / "artefacts" / "p3_lr_scales.npy")
+        print("✅ Loaded Phase 3 loss and LR scale history")
+    except Exception as e:
+        print(f"⚠️ Could not load Phase 3 loss history: {e}")
+
+## Plot and save loss curve as p3_loss.png
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(all_losses, label='Loss')
+ax.set_xlabel('Train Step')
+num_steps = len(all_losses)
+step_ticks = np.linspace(0, num_steps, 5)
+ax.set_xticks(step_ticks)
+ax.set_xticklabels([f"{int(tick/1000)}k" for tick in step_ticks])
+ax.set_ylabel('Loss')
+ax.set_yscale('log')
+ax.set_title('Phase 3 Training Loss')
+plt.draw()
+plt.savefig(run_dir / "plots" / "p3_loss.png")
+
 
 #%% Generative Evaluation & Rollout
 print("\n Generative Evaluation Rollout (context_ratio=0.0)...")
@@ -251,7 +260,8 @@ for i in range(pred_videos.shape[0]):
 
 
 # %% Copy nohup.log to run_dir for record keeping
-shutil.copy("nohup.log", run_dir / "nohup_p3.log")
+# shutil.copy("nohup.log", run_dir / "nohup_p3.log")
+os.system(f"cp nohup.log {run_dir / 'nohup_p3.log'}")
 
 
 

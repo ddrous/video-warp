@@ -8,10 +8,9 @@ import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
-import shutil
 import os
 
-from utils import setup_run_dir, get_coords_grid, ssim, plot_videos, count_trainable_params
+from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params
 from loaders import get_dataloaders, torch
 from models import WeightCNN, RootMLP, fourier_encode
 from jax.flatten_util import ravel_pytree
@@ -42,19 +41,20 @@ np.random.seed(CONFIG["seed"])
 # CONFIG["data_path"] = "../../" + str(data_dir)
 
 run_dir = setup_run_dir("phase_1", CONFIG, train=TRAIN)
+print(f"Runing and saving Phase 1 outputs to: {run_dir}", flush=True)
 
 train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_1")
 
 vis_batch = next(iter(train_loader))
 print(f"Sample batch shape: {vis_batch.shape}", flush=True)
-if hasattr(train_loader.dataset.dataset, "max_val"):
-    emp_max_val  = train_loader.dataset.dataset.max_val
+if hasattr(train_loader.dataset, "max_val"):
+    emp_max_val  = train_loader.dataset.max_val
     print(f"Empirical max val in the training set: {emp_max_val:.4f}", flush=True)
 else:
     print("WARNING. Max val not provided. Assuming data is normealised RGB pixel vals, so empirical data range is 1.0. Needed for SSIM")
     emp_max_val = 1.0
 
-print(f"Max/min val sanity check in the sample batch: {vis_batch.max():.4f}, min value: {vis_batch.min():.4f}", flush=True)
+print(f"Max val sanity check in the sample batch: {vis_batch.max():.4f}\n", flush=True)
 
 if vis_batch.ndim == 4:
     B, H, W, C = vis_batch.shape
@@ -140,12 +140,10 @@ def train_step(enc, opt_state, batch_frames, coords_grid):
 
         # ssim_loss = 1.0 - jnp.mean(jax.vmap(ssim)(reconstructed, batch_frames))
 
-        # FIX 1: Use dm-pix for true local sliding-window SSIM
-        # FIX 2: Explicitly pass your data range (assuming [-1, 1] here, so range is 2.0. If [0, 1], change to 1.0)
-        def compute_single_ssim(pred, target):
+        def compute_ssim(pred, target):
             return pix.ssim(pred, target, max_val=emp_max_val)
 
-        ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_single_ssim)(reconstructed, batch_frames))
+        ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_ssim)(reconstructed, batch_frames))
 
         mse_w = CONFIG["phase_1"]["mse_weight"]
 
@@ -174,7 +172,10 @@ def eval_step(enc, batch_frames, coords_grid):
     reconstructed = batched_render(offsets)
 
     mse_loss = jnp.mean((reconstructed - batch_frames)**2)
-    ssim_loss = 1.0 - jnp.mean(jax.vmap(ssim)(reconstructed, batch_frames))
+
+    def compute_ssim(pred, target):
+        return pix.ssim(pred, target, max_val=emp_max_val)
+    ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_ssim)(reconstructed, batch_frames))
     
     ## Reshape the reconstructed frames back to (B, T, H, W, C) if needed
     if orig_dim == 5:
@@ -218,7 +219,7 @@ if TRAIN:
                 np.expand_dims(vis_batch, axis=1)[0] if vis_batch.ndim == 4 else vis_batch[0],
                 show_borders=True,
                 corner_radius=5,
-                no_rescale=False,
+                no_rescale=True,
                 cmap="grey" if CONFIG["dataset"].lower() == "movingmnist" else "viridis",
                 plot_ref=True, show_titles=True, save_name=run_dir / "plots" / f"p1_epoch{epoch+1}.png"
             )
@@ -226,17 +227,8 @@ if TRAIN:
     print("\nWall time:", time.strftime("%H:%M:%S", time.gmtime(time.time() - start_time)))
 
     eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
-    # eqx.tree_serialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
+    eqx.tree_serialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
     print("✅ Saved isolated WeightCNN (with theta_base)")
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(epoch_losses_all, label='Loss')
-    ax.set_xlabel('Train Step')
-    ax.set_ylabel('Loss')
-    ax.set_yscale('log')
-    ax.set_title('Phase 1 Training Loss')
-    plt.draw()
-    plt.savefig(run_dir / "plots" / "p1_loss.png")
 
     ## Save the array as well
     np.save(run_dir / "artefacts" / "p1_loss.npy", np.array(epoch_losses_all))
@@ -249,7 +241,32 @@ else:
         encoder = eqx.tree_deserialise_leaves(f"artefacts/vwarp_enc_{CONFIG["dataset"].lower()}.eqx", encoder)
         eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
     except FileNotFoundError as e:
-        print(f"⚠️ Could not find pretrained encoder. Continuing with untrained. ({e})")
+        try:
+            encoder = eqx.tree_deserialise_leaves(run_dir / "artefacts" / "vwarp_enc.eqx", encoder)
+        except Exception as e:
+            print(f"⚠️ Could not find pretrained encoder. Continuing with untrained. ({e})")
+
+    ## Load the loss and lr scale arrays if they exist, for visualisation
+    try:
+        epoch_losses_all = np.load(run_dir / "artefacts" / "p1_loss.npy")
+        lr_scales = np.load(run_dir / "artefacts" / "p1_lr_scales.npy")
+    except Exception as e:
+        print(f"⚠️ Could not load loss and lr scale arrays. ({e}) Initializing empty arrays for visualisation.")
+        epoch_losses_all = np.array([])
+        lr_scales = np.array([])
+
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(epoch_losses_all, label='Loss')
+ax.set_xlabel('Train Step')
+num_steps = len(epoch_losses_all)
+step_ticks = np.linspace(0, num_steps, 5)
+ax.set_xticks(step_ticks)
+ax.set_xticklabels([f"{int(tick/1000)}k" for tick in step_ticks])
+ax.set_ylabel('Loss')
+ax.set_yscale('log')
+ax.set_title('Phase 1 Training Loss')
+plt.draw()
+plt.savefig(run_dir / "plots" / "p1_loss.png")
 
 #%% Visualise Reconstructions
 
@@ -267,14 +284,15 @@ plot_videos(
     np.expand_dims(test_batch, axis=1)[test_id] if test_batch.ndim == 4 else test_batch[test_id],
     show_borders=True,
     corner_radius=5,
-    no_rescale=False,
+    no_rescale=True,
     cmap="grey" if CONFIG["dataset"].lower() == "movingmnist" else "viridis",
     plot_ref=True, show_titles=True, save_name=run_dir / "plots" / "phase1_recons.png"
 )
 
 
 # %% Copy nohup.log to run_dir for record keeping
-shutil.copy("nohup.log", run_dir / "nohup_p1.log")
+# shutil.copy("nohup.log", run_dir / "nohup_p1.log")
+os.system(f"cp nohup.log {run_dir / 'nohup_p1.log'}")
 
 
 ## if dim==4, then expand the time dimension for consistent indexing in the rest of the code

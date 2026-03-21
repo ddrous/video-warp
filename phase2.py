@@ -8,9 +8,7 @@ import numpy as np
 import yaml
 import matplotlib.pyplot as plt
 import seaborn as sns
-from pathlib import Path
-import sys
-import shutil
+import os
 
 from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params, ssim
 from loaders import get_dataloaders, torch
@@ -251,16 +249,6 @@ if TRAIN:
     eqx.tree_serialise_leaves(run_dir / "artefacts" / "vwarp_phase2.eqx", model)
     print("✅ Saved Phase 2 Model")
 
-    ## Plot and save the loss as p2_loss.png
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.plot(all_losses, label='Loss')
-    ax.set_xlabel('Train Step')
-    ax.set_ylabel('Loss')
-    ax.set_yscale('log')
-    ax.set_title('Phase 2 Training Loss')
-    plt.draw()
-    plt.savefig(run_dir / "plots" / "p2_loss.png")
-
     ## Save the array as well
     np.save(run_dir / "artefacts" / "p2_loss.npy", np.array(all_losses))
     np.save(run_dir / "artefacts" / "p2_lr_scales.npy", np.array(lr_scales))
@@ -268,6 +256,28 @@ if TRAIN:
 else:
     # Just in case TRAIN is false, make sure model is unified
     model = eqx.combine(diff_model, static_model)
+
+    try:
+        all_losses = np.load(run_dir / "artefacts" / "p2_loss.npy")
+        lr_scales = np.load(run_dir / "artefacts" / "p2_lr_scales.npy")
+        print(f"✅ Loaded Phase 2 losses and LR scales from {run_dir / 'artefacts'}")
+    except Exception as e:
+        print(f"⚠️ Could not load Phase 2 losses or LR scales from {run_dir / 'artefacts'}. ({e})")
+
+## Plot and save the loss as p2_loss.png
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.plot(all_losses, label='Loss')
+ax.set_xlabel('Train Step')
+num_steps = len(all_losses)
+step_ticks = np.linspace(0, num_steps, 5)
+ax.set_xticks(step_ticks)
+ax.set_xticklabels([f"{int(tick/1000)}k" for tick in step_ticks])
+ax.set_ylabel('Loss')
+ax.set_yscale('log')
+ax.set_title('Phase 2 Training Loss')
+plt.draw()
+plt.savefig(run_dir / "plots" / "p2_loss.png")
+
 
 #%% Visualisations
 print("\n Generating Visualizations...")
@@ -301,4 +311,4 @@ if CONFIG["discrete_actions"]:
     plt.show()
 
 # %% Copy nohup.log to run_dir for record keeping
-shutil.copy("nohup.log", run_dir / "nohup_p2.log")
+os.system(f"cp nohup.log {run_dir / 'nohup_p2.log'}")
