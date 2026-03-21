@@ -27,7 +27,7 @@ phase_1:
   batch_size: 16
   learning_rate: 1.0e-5
   encoder_sees_test: True
-  mse_weight: 0.16
+  mse_weight: 1.0
   # Phase 1 LR Scheduler
   lr_patience: 50
   lr_factor: 0.5
@@ -40,19 +40,19 @@ phase_1:
 # Phase 2: Dynamics Fitting (IDM + FDM)
 # ==========================================
 phase_2:
-  nb_epochs: 100
+  nb_epochs: 50
   print_every: 1
   batch_size: 64
-  learning_rate: 1.0e-4
+  learning_rate: 5.0e-5
   loss_type: "latent"  # Options: "latent" or "pixel"
   mse_weight: 0.16     # Only used if loss_type is "pixel"
   num_actions: 5
   train_encoder: false
   # Phase 2 Augmentations
-  reverse_video_aug: true
-  static_video_aug: true
+  reverse_video_aug: false
+  static_video_aug: false
   # Phase 2 LR Scheduler
-  lr_patience: 300
+  lr_patience: 500
   lr_factor: 0.5
   lr_cooldown: 100
   lr_rtol: 1.0e-4
@@ -63,15 +63,15 @@ phase_2:
 # Phase 3: Generative Control (GCM)
 # ==========================================
 phase_3:
-  nb_epochs: 100
+  nb_epochs: 50
   print_every: 1
   batch_size: 64
-  learning_rate: 1.0e-4
+  learning_rate: 1.0e-5
   loss_type: "L2"      # Options: "L1" or "L2"
   num_actions: 5
   gcm_type: "transformer"
   # Phase 3 LR Scheduler
-  lr_patience: 300
+  lr_patience: 500
   lr_factor: 0.5
   lr_cooldown: 100
   lr_rtol: 1.0e-4

@@ -142,11 +142,12 @@ def train_step(enc, opt_state, batch_frames, coords_grid):
         def compute_ssim(pred, target):
             return pix.ssim(pred, target, max_val=emp_max_val)
 
-        ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_ssim)(reconstructed, batch_frames))
-
         mse_w = CONFIG["phase_1"]["mse_weight"]
-
-        return  mse_w * mse_loss + (1 - mse_w) * ssim_loss
+        if mse_w >= 1.0:
+            return mse_loss
+        else:
+            ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_ssim)(reconstructed, batch_frames))
+            return  mse_w * mse_loss + (1 - mse_w) * ssim_loss
 
     loss_val, grads = eqx.filter_value_and_grad(loss_fn)(enc)
     updates, opt_state = optimizer.update(grads, opt_state, enc, value=loss_val)
@@ -254,18 +255,19 @@ else:
         epoch_losses_all = np.array([])
         lr_scales = np.array([])
 
-fig, ax = plt.subplots(figsize=(8, 4))
-ax.plot(epoch_losses_all, label='Loss')
-ax.set_xlabel('Train Step')
-num_steps = len(epoch_losses_all)
-step_ticks = np.linspace(0, num_steps, 5)
-ax.set_xticks(step_ticks)
-ax.set_xticklabels([f"{int(tick/1000)}k" for tick in step_ticks])
-ax.set_ylabel('Loss')
-ax.set_yscale('log')
-ax.set_title('Phase 1 Training Loss')
-plt.draw()
-plt.savefig(run_dir / "plots" / "p1_loss.png")
+if len(epoch_losses_all) > 0:
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.plot(epoch_losses_all, label='Loss')
+    ax.set_xlabel('Train Step')
+    num_steps = len(epoch_losses_all)
+    step_ticks = np.linspace(0, num_steps, 5)
+    ax.set_xticks(step_ticks)
+    ax.set_xticklabels([f"{int(tick/1000)}k" for tick in step_ticks])
+    ax.set_ylabel('Loss')
+    ax.set_yscale('log')
+    ax.set_title('Phase 1 Training Loss')
+    plt.draw()
+    plt.savefig(run_dir / "plots" / "p1_loss.png")
 
 #%% Visualise Reconstructions
 

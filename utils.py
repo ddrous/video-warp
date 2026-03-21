@@ -98,15 +98,10 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 vmin=None, vmax=None, save_name=None, 
                 wspace=0.05, hspace=0.02, forecast_gap=0.2, 
                 save_video=False, video_gap=5, show_borders=False, corner_radius=5,
-                no_rescale=True, cmap='viridis', row_height="auto"):
+                no_rescale=True, cmap='coolwarm', row_height="auto", gif_scale=4):
     """
-    Plots a camera-ready rollout of ground truth and predicted video frames.
-    
-    Args:
-        show_borders (bool): If True, applies rounded borders to the frames.
-        corner_radius (int): The radius of the rounded corners (if show_borders=True).
-        cmap (str): Matplotlib colormap name to use for single-channel data.
-        row_height (str or float): "auto" dynamically calculates height to prevent letterboxing.
+    Plots a camera-ready rollout of ground truth and predicted video frames, 
+    and saves a high-res, properly scaled GIF.
     """
     with plt.rc_context({
         'font.family': 'sans-serif',
@@ -145,31 +140,25 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
         # Base width calculation
         fig_width = (nb_frames + (forecast_gap if has_gap else 0.0)) * 1.5
         
-        # --- THE FIX: DYNAMIC ASPECT RATIO SCALING ---
         if row_height == "auto":
             H, W = video.shape[1:3]
             aspect = H / W
-            # Shrink-wrap the row height perfectly to the image aspect ratio
-            calculated_row_height = aspect * 1.2 if show_titles else aspect*1.5
-            # Add a small buffer for the titles so they don't get cropped
+            calculated_row_height = aspect * 1.2 if show_titles else aspect * 1.5
             title_buffer = 0.5 if show_titles else 0.1
             fig_height = (nrows * calculated_row_height) + title_buffer
         else:
             fig_height = nrows * float(row_height)
-        # ---------------------------------------------
         
         fig = plt.figure(figsize=(fig_width, fig_height))
-        
         gs = fig.add_gridspec(nrows, ncols, wspace=wspace, hspace=hspace, width_ratios=width_ratios)
         axes = np.empty((nrows, ncols), dtype=object)
         for r in range(nrows):
             for c in range(ncols):
                 axes[r, c] = fig.add_subplot(gs[r, c])
 
+        # Establish Global Min/Max
         if vmin is None or vmax is None:
             if plot_ref:
-                # global_min = min(video.min(), ref_video.min())
-                # global_max = max(video.max(), ref_video.max())
                 global_min = ref_video.min()
                 global_max = ref_video.max()
             else:
@@ -179,9 +168,7 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             if vmin is None: vmin = global_min
             if vmax is None: vmax = global_max
 
-        imshow_kwargs = {'cmap': cmap}
-        imshow_kwargs['vmin'] = vmin
-        imshow_kwargs['vmax'] = vmax
+        imshow_kwargs = {'cmap': cmap, 'vmin': vmin, 'vmax': vmax}
 
         frame_idx = 0
         for c in range(ncols):
@@ -193,18 +180,20 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             pred_frame = video[frame_idx]
             if rescale: pred_frame = (pred_frame + 1.0) / 2.0
             
-            if plot_ref or (vmin is None and vmax is None):
+            # Fix: Only clip if RGB. Let imshow handle scalar arrays natively.
+            if pred_frame.shape[-1] in [3, 4]:
                 pred_frame = np.clip(pred_frame, 0.0, 1.0)
-            
-            if pred_frame.shape[-1] == 1:
+            elif pred_frame.shape[-1] == 1:
                 pred_frame = pred_frame[..., 0]
 
             if plot_ref:
                 ref_idx = min(frame_idx, ref_video.shape[0] - 1)
                 ref_frame = ref_video[ref_idx]
                 if rescale: ref_frame = (ref_frame + 1.0) / 2.0
-                ref_frame = np.clip(ref_frame, 0.0, 1.0)
-                if ref_frame.shape[-1] == 1:
+                
+                if ref_frame.shape[-1] in [3, 4]:
+                    ref_frame = np.clip(ref_frame, 0.0, 1.0)
+                elif ref_frame.shape[-1] == 1:
                     ref_frame = ref_frame[..., 0]
 
             if plot_ref:
@@ -220,7 +209,6 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 ax.set_yticks([])
                 
                 h, w = frame_data.shape[:2]
-                
                 for spine in ax.spines.values():
                     spine.set_visible(False)
                     
@@ -236,11 +224,7 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
 
             if show_titles:
                 top_ax = axes[0, c]
-                if frame_idx == 0 or (frame_idx + 1 == forecast_start):
-                    title_str = f"$t={frame_idx + 1}$"
-                else:
-                    title_str = str(frame_idx + 1)
-                
+                title_str = f"$t={frame_idx + 1}$" if (frame_idx == 0 or (frame_idx + 1 == forecast_start)) else str(frame_idx + 1)
                 font_weight = 'bold' if (has_gap and frame_idx + 1 == forecast_start) else 'normal'
                 top_ax.set_title(title_str, pad=8, fontsize=18, fontweight=font_weight)
 
@@ -249,9 +233,7 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
         if show_labels:
             if plot_ref:
                 axes[0, 0].set_ylabel("GT",   rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
-                axes[1, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
-            else:
-                axes[0, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
+            axes[-1, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
 
         if save_name:
             plt.savefig(save_name, dpi=100, bbox_inches='tight', facecolor='white', transparent=False)
@@ -267,76 +249,88 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
         plt.close(fig)
 
         # ---------------------------------------------------------
-        # GIF / Video Generation
+        # GIF Generation
         # ---------------------------------------------------------
         if save_video and save_name is not None:
+            
+            # Scale fonts up based on gif_scale
             try:
-                font = ImageFont.truetype("Helvetica.ttc", 14)
+                font = ImageFont.truetype("arial.ttf", 14 * gif_scale)
             except IOError:
                 try:
-                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 12)
+                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 14 * gif_scale)
                 except IOError:
                     font = ImageFont.load_default()
 
             def process_pil_image(img_array, radius=corner_radius, apply_frame=show_borders):
                 h, w = img_array.shape[:2]
                 img = Image.fromarray((img_array * 255).astype(np.uint8))
+                
+                # Resize the underlying image using NEAREST to maintain sharp grid pixels
+                new_w, new_h = w * gif_scale, h * gif_scale
+                img = img.resize((new_w, new_h), Image.NEAREST)
+                
                 if not apply_frame: return img
-                mask = Image.new("L", (w, h), 0)
+                
+                scaled_radius = radius * gif_scale
+                mask = Image.new("L", (new_w, new_h), 0)
                 draw = ImageDraw.Draw(mask)
-                draw.rounded_rectangle((0, 0, w, h), radius=radius, fill=255)
-                rounded_img = Image.new("RGB", (w, h), "white")
+                draw.rounded_rectangle((0, 0, new_w, new_h), radius=scaled_radius, fill=255)
+                
+                rounded_img = Image.new("RGB", (new_w, new_h), "white")
                 rounded_img.paste(img, (0, 0), mask=mask)
+                
                 draw_border = ImageDraw.Draw(rounded_img)
-                draw_border.rounded_rectangle((0, 0, w-1, h-1), radius=radius, outline="black", width=1)
+                draw_border.rounded_rectangle((0, 0, new_w-1, new_h-1), radius=scaled_radius, outline="black", width=max(1, gif_scale//2))
                 return rounded_img
 
-            def apply_cmap_to_frame(frame):
+            def apply_cmap_to_frame(frame, v_min, v_max):
                 if frame.ndim == 3 and frame.shape[-1] == 1: frame = frame[..., 0]
+                # Fix: Use plt.Normalize so colors match matplotlib perfectly
+                norm = plt.Normalize(vmin=v_min, vmax=v_max)
                 colormap = plt.get_cmap(cmap)
-                return colormap(frame)[..., :3]
+                return colormap(norm(frame))[..., :3]
 
             gif_frames = []
+            scaled_gap = video_gap * gif_scale
+            header_height = 20 * gif_scale
+
             for t in range(nb_frames):
                 p_f = video[t]
                 if rescale: p_f = (p_f + 1.0) / 2.0
-                if not plot_ref and (vmin is not None or vmax is not None):
-                    v_min = vmin if vmin is not None else p_f.min()
-                    v_max = vmax if vmax is not None else p_f.max()
-                    p_f = (p_f - v_min) / (v_max - v_min + 1e-8)
-                p_f = np.clip(p_f, 0.0, 1.0)
-                p_f = apply_cmap_to_frame(p_f)
+                p_f = apply_cmap_to_frame(p_f, vmin, vmax)
 
                 if plot_ref:
                     r_idx = min(t, ref_video.shape[0] - 1)
                     r_f = ref_video[r_idx]
                     if rescale: r_f = (r_f + 1.0) / 2.0
-                    r_f = np.clip(r_f, 0.0, 1.0)
-                    r_f = apply_cmap_to_frame(r_f)
+                    r_f = apply_cmap_to_frame(r_f, vmin, vmax)
                     
                     img_ref  = process_pil_image(r_f)
                     img_pred = process_pil_image(p_f)
                     
-                    combined_w = img_ref.width + video_gap + img_pred.width
+                    combined_w = img_ref.width + scaled_gap + img_pred.width
                     combined_h = max(img_ref.height, img_pred.height)
                     combined_frame = Image.new('RGB', (combined_w, combined_h), 'white')
                     combined_frame.paste(img_ref,  (0, 0))
-                    combined_frame.paste(img_pred, (img_ref.width + video_gap, 0))
+                    combined_frame.paste(img_pred, (img_ref.width + scaled_gap, 0))
                 else:
                     combined_frame = process_pil_image(p_f)
 
-                header_height = 15
                 final_img = Image.new('RGB', (combined_frame.width, combined_frame.height + header_height), color='white')
                 final_img.paste(combined_frame, (0, header_height))
                 
                 draw = ImageDraw.Draw(final_img)
+                
                 if plot_ref:
-                    gt_w   = r_f.shape[1]
-                    pred_w = p_f.shape[1]
-                    draw.text((gt_w // 2 - 10, 2), "GT", font=font, fill="black")
-                    draw.text((gt_w + video_gap + pred_w // 2 - 17, 2), "Pred", font=font, fill="black")
+                    gt_w = draw.textlength("GT", font=font) if hasattr(draw, 'textlength') else 20 * gif_scale
+                    pred_w = draw.textlength("Pred", font=font) if hasattr(draw, 'textlength') else 30 * gif_scale
+                    
+                    draw.text(((img_ref.width - gt_w) // 2, 2 * gif_scale), "GT", font=font, fill="black")
+                    draw.text((img_ref.width + scaled_gap + (img_pred.width - pred_w) // 2, 2 * gif_scale), "Pred", font=font, fill="black")
                 else:
-                    draw.text((p_f.shape[1] // 2 - 17, 2), "Pred", font=font, fill="black")
+                    pred_w = draw.textlength("Pred", font=font) if hasattr(draw, 'textlength') else 30 * gif_scale
+                    draw.text(((combined_frame.width - pred_w) // 2, 2 * gif_scale), "Pred", font=font, fill="black")
                 
                 gif_frames.append(final_img)
             

@@ -188,10 +188,13 @@ def train_step(diff_m, static_m, opt_state, batch_keys, in_videos, coords_grid):
 
             def compute_ssim(pred, target):
                 return pix.ssim(pred, target, max_val=emp_max_val)
-            ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_ssim)(pred_videos, ref_videos))
 
             mse_weight = CONFIG["phase_2"]["mse_weight"]
-            loss = (1-mse_weight)*ssim_loss + mse_weight*mse_loss
+            if mse_weight >= 1.0:
+                loss = mse_loss
+            else:
+                ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_ssim)(pred_videos, ref_videos))
+                loss = (1-mse_weight)*ssim_loss + mse_weight*mse_loss
 
         if CONFIG["discrete_actions"]:
             book_loss = jnp.mean((jax.lax.stop_gradient(raw_actions) - quant_actions)**2)

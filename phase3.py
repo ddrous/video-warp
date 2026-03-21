@@ -339,6 +339,6 @@ plot_videos(
     plot_ref=True, 
     show_titles=True,
     show_borders=True,
-    save_name=run_dir / "plots" / f"p3_custom_ar_{i}.png",
+    save_name=run_dir / "plots" / f"p3_custom_ar_{test_seq_id}.png",
     save_video=True
 )

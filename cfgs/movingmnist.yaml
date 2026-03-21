@@ -2,7 +2,7 @@
 dataset: "MovingMnist"
 data_path: "./data"
 seed: 2026
-debug: false
+debug: true
 
 # Architecture Base (Inherited across all phases)
 root_activation: "relu"
@@ -27,7 +27,7 @@ phase_1:
   batch_size: 64
   learning_rate: 1.0e-5
   encoder_sees_test: False
-  mse_weight: 0.16
+  mse_weight: 1.0
   # Phase 1 LR Scheduler
   lr_patience: 500
   lr_factor: 0.5
