@@ -9,12 +9,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import os
+import dm_pix as pix
 
 from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params
 from loaders import get_dataloaders, torch
 from models import WeightCNN, RootMLP, fourier_encode
 from jax.flatten_util import ravel_pytree
-import dm_pix as pix
 
 try:
     cfg_name = sys.argv[1]
@@ -53,7 +53,6 @@ if hasattr(train_loader.dataset, "max_val"):
 else:
     print("WARNING. Max val not provided. Assuming data is normealised RGB pixel vals, so empirical data range is 1.0. Needed for SSIM")
     emp_max_val = 1.0
-
 print(f"Max val sanity check in the sample batch: {vis_batch.max():.4f}\n", flush=True)
 
 if vis_batch.ndim == 4:
@@ -293,30 +292,3 @@ plot_videos(
 # %% Copy nohup.log to run_dir for record keeping
 # shutil.copy("nohup.log", run_dir / "nohup_p1.log")
 os.system(f"cp nohup.log {run_dir / 'nohup_p1.log'}")
-
-
-## if dim==4, then expand the time dimension for consistent indexing in the rest of the code
-if reconstructed.ndim == 4:
-    reconstructed = np.expand_dims(reconstructed, axis=1)
-if test_batch.ndim == 4:
-    test_batch = np.expand_dims(test_batch, axis=1)
-
-print(f"Actual values of rec vs gt (for the sample frame visualised above): \nRecon: {reconstructed[test_id, 0, :5, :5, 0]} \nGT: {test_batch[test_id, 0, :5, :5, 0]}", flush=True)
-
-## print more central pixels for the same frame, to check if the model is at least getting the general structure right
-center_h, center_w = reconstructed.shape[2] // 2, reconstructed.shape[3] // 2
-print(f"Central 5x5 patch values: \nRecon: {reconstructed[test_id, 0, center_h-2:center_h+3, center_w-2:center_w+3, 0]} \nGT: {test_batch[test_id, 0, center_h-2:center_h+3, center_w-2:center_w+3, 0]}", flush=True)
-
-
-## Imshow the two side by side for a quick visual check
-plt.figure(figsize=(10, 5))
-plt.subplot(1, 2, 1)
-plt.imshow(reconstructed[test_id, 0], cmap='viridis', vmin=-1, vmax=1)
-plt.title("Reconstructed")
-plt.axis('off') 
-
-plt.subplot(1, 2, 2)
-plt.imshow(test_batch[test_id, 0], cmap='viridis', vmin=-1, vmax=1)
-plt.title("Ground Truth")
-plt.axis('off')
-plt.suptitle("Sample Reconstruction vs Ground Truth")

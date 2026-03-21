@@ -9,8 +9,9 @@ import yaml
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import dm_pix as pix
 
-from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params, ssim
+from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params
 from loaders import get_dataloaders, torch
 from models import VWARP
 
@@ -97,6 +98,15 @@ train_loader, test_loader = get_dataloaders(CONFIG, phase="phase_2")
 sample_batch = next(iter(train_loader))
 B, T, H, W, C = sample_batch.shape
 print(f"Sample batch shape: {sample_batch.shape}", flush=True)
+
+if hasattr(train_loader.dataset, "max_val"):
+    emp_max_val  = train_loader.dataset.max_val
+    print(f"Empirical max val in the training set: {emp_max_val:.4f}", flush=True)
+else:
+    print("WARNING. Max val not provided. Assuming data is normealised RGB pixel vals, so empirical data range is 1.0. Needed for SSIM")
+    emp_max_val = 1.0
+print(f"Max val sanity check in the sample batch: {sample_batch.max():.4f}\n", flush=True)
+
 coords_grid = get_coords_grid(H, W)
 
 key, subkey = jax.random.split(key)
@@ -174,11 +184,11 @@ def train_step(diff_m, static_m, opt_state, batch_keys, in_videos, coords_grid):
         if CONFIG["phase_2"]["loss_type"] == "latent" and not CONFIG["phase_2"]["train_encoder"]:
             loss = jnp.mean((pred_lats[:, :-1] - gt_lats[:, :-1])**2) 
         else:
-            # target_videos = jnp.concatenate([ref_videos[:, 1:], jnp.zeros_like(ref_videos[:, :1])], axis=1)
-            # mse_loss = jnp.mean((pred_videos[:, :-1] - target_videos[:, :-1])**2)
-
             mse_loss = jnp.mean((pred_videos - ref_videos)**2)
-            ssim_loss = 1.0 - jnp.mean(jax.vmap(jax.vmap(ssim))(pred_videos, ref_videos))
+
+            def compute_ssim(pred, target):
+                return pix.ssim(pred, target, max_val=emp_max_val)
+            ssim_loss = 1.0 - jnp.mean(jax.vmap(compute_ssim)(pred_videos, ref_videos))
 
             mse_weight = CONFIG["phase_2"]["mse_weight"]
             loss = (1-mse_weight)*ssim_loss + mse_weight*mse_loss

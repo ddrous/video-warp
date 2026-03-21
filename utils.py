@@ -37,8 +37,8 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
         print(f"⚠️⚠️⚠️ WARNING: We recommend running {phase_name} from the run directory created by phase_1 ⚠️⚠️⚠️", flush=True)
 
     ## If phase 2 or 3, do nothing, return ./
-    # if not train or phase_name in ["phase_2", "phase_3"]:
-    if not train:
+    if not train or phase_name in ["phase_2", "phase_3"]:
+    # if not train:
         # data_dir = Path(config["data_path"])
         # config["data_path"] = "../../" + str(data_dir.name)
 
@@ -98,7 +98,7 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 vmin=None, vmax=None, save_name=None, 
                 wspace=0.05, hspace=0.02, forecast_gap=0.2, 
                 save_video=False, video_gap=5, show_borders=False, corner_radius=5,
-                no_rescale=False, cmap='viridis', row_height="auto"):
+                no_rescale=True, cmap='viridis', row_height="auto"):
     """
     Plots a camera-ready rollout of ground truth and predicted video frames.
     
