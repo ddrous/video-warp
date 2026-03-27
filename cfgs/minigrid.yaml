@@ -23,9 +23,9 @@ use_action_residuals: false
 # Phase 1: Autoencoder Pretraining
 # ==========================================
 phase_1:
-  nb_epochs: 100
+  nb_epochs: 1000
   print_every: 10
-  batch_size: 16
+  batch_size: 128
   learning_rate: 1.0e-5
   encoder_sees_test: False
   mse_weight: 1.0
@@ -41,7 +41,7 @@ phase_1:
 # Phase 2: Dynamics Fitting (IDM + FDM)
 # ==========================================
 phase_2:
-  nb_epochs: 2500
+  nb_epochs: 5000
   print_every: 10
   batch_size: 16
   learning_rate: 1.0e-5
@@ -64,7 +64,7 @@ phase_2:
 # Phase 3: Generative Control (GCM)
 # ==========================================
 phase_3:
-  nb_epochs: 5000
+  nb_epochs: 2000
   print_every: 10
   batch_size: 128
   learning_rate: 1.0e-5

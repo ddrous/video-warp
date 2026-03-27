@@ -249,8 +249,8 @@ def visualise_frames(videos, video_idx=0, interval=150, title="MiniGrid episode"
 if __name__ == "__main__":
 
     # num_videos       = 500*16
-    num_videos       = int(7000)
-    temporal_horizon = 12          
+    num_videos       = int(10000)
+    temporal_horizon = 10          
 
     env_id_empty  = 'MiniGrid-Empty-16x16-v0'
     policy_empty  = 'empty'

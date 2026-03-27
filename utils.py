@@ -285,8 +285,15 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
                 return rounded_img
 
             def apply_cmap_to_frame(frame, v_min, v_max):
-                if frame.ndim == 3 and frame.shape[-1] == 1: frame = frame[..., 0]
-                # Fix: Use plt.Normalize so colors match matplotlib perfectly
+                # Fix: If the frame is already RGB/RGBA, do NOT apply a colormap
+                if frame.ndim == 3 and frame.shape[-1] in [3, 4]:
+                    # Clip to [0, 1] to be safe, then return the RGB channels
+                    return np.clip(frame[..., :3], 0.0, 1.0)
+                    
+                # If it's a single channel, squeeze it for the colormap
+                if frame.ndim == 3 and frame.shape[-1] == 1: 
+                    frame = frame[..., 0]
+                    
                 norm = plt.Normalize(vmin=v_min, vmax=v_max)
                 colormap = plt.get_cmap(cmap)
                 return colormap(norm(frame))[..., :3]

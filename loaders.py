@@ -184,7 +184,7 @@ def get_dataloaders(config, phase="phase_1"):
     
     if dataset_name.lower() == "minigrid":
         arrays = np.load(f"{data_path}/MiniGrid/minigrid.npy")
-        arrays = arrays[:, :12]
+        arrays = arrays[:, :10]
         train_size = int(0.8 * arrays.shape[0])
         train_arrays = arrays[:train_size]
         test_arrays = arrays[train_size:]

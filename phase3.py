@@ -9,8 +9,8 @@ import yaml
 import matplotlib.pyplot as plt
 import os
 
-from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params, torch
-from loaders import get_dataloaders
+from utils import setup_run_dir, get_coords_grid, plot_videos, count_trainable_params
+from loaders import get_dataloaders, torch
 from models import VWARP
 
 try:

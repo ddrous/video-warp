@@ -44,7 +44,7 @@ The modules run sequentially:
 
 ## Trained Models (TODO: Add links to trained models)
 The following folders will be made available for each dataset, containing trained models, logs, and plots used in the paper:
-* **MiniGrid**: `runs/260316-202801-PerfectMiniGrid*`
+* **MiniGrid**: `runs/260325-231413-MiniGrid*`
 * **MovingMNIST**: `runs/260312-113749-PerfectMNIST*`
 * **WeatherBench**: `runs/260321-013009-WeatherBench*`
 * **PhyWorld**: `runs/260318-174150-PhyWorld*`
