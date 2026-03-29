@@ -22,7 +22,7 @@ use_action_residuals: false
 # Phase 1: Autoencoder Pretraining
 # ==========================================
 phase_1:
-  nb_epochs: 10
+  nb_epochs: 100
   print_every: 1
   batch_size: 16
   learning_rate: 1.0e-5

@@ -1,0 +1,60 @@
+cnn_depth: 4
+cnn_hidden_width: 32
+data_path: ./data
+dataset: PhyWorld
+debug: false
+discrete_actions: false
+lam_space: 4
+mem_space: 256
+num_fourier_freqs: 6
+phase_1:
+  batch_size: 16
+  encoder_sees_test: true
+  learning_rate: 1.0e-05
+  lr_accum_size: 5
+  lr_cooldown: 20
+  lr_factor: 0.5
+  lr_min_scale: 1.0
+  lr_patience: 50
+  lr_rtol: 0.0001
+  mse_weight: 0.16
+  nb_epochs: 10
+  print_every: 1
+phase_2:
+  batch_size: 64
+  learning_rate: 0.00005
+  loss_type: latent
+  lr_accum_size: 5
+  lr_cooldown: 100
+  lr_factor: 0.5
+  lr_min_scale: 1.0
+  lr_patience: 300
+  lr_rtol: 0.0001
+  mse_weight: 0.16
+  nb_epochs: 100
+  num_actions: 5
+  print_every: 1
+  reverse_video_aug: false
+  static_video_aug: false
+  train_encoder: false
+phase_3:
+  batch_size: 64
+  gcm_type: transformer
+  learning_rate: 0.00001
+  loss_type: L2
+  lr_accum_size: 5
+  lr_cooldown: 100
+  lr_factor: 0.5
+  lr_min_scale: 0.1
+  lr_patience: 300
+  lr_rtol: 0.0001
+  nb_epochs: 12
+  num_actions: 5
+  print_every: 1
+root_activation: relu
+root_depth: 5
+root_width: 12
+seed: 2026
+split_forward: true
+use_action_residuals: false
+use_time_in_root: false

@@ -33,3 +33,15 @@ latent_action_models/nohup.log
 !runs/README.md
 !data/README.md
 !data/MiniGrid/gendata.py
+
+
+# Track only the most successful runs
+runs/*
+!runs/*/
+runs/*/*
+!runs/260321-013009-WeatherBench*/config.yaml
+!runs/260327-181623-PhyWorld-New*/config.yaml
+!runs/260325-231413-MiniGrid*/config.yaml
+!runs/260318-174150-PhyWorld*/config.yaml
+!runs/260312-113749-PerfectMNIST*/main.py
+!runs/260316-202801-MiniGrid-Easy*/config.yaml
