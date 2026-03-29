@@ -267,7 +267,7 @@ if len(epoch_losses_all) > 0:
     ax.set_yscale('log')
     ax.set_title('Phase 1 Training Loss')
     plt.draw()
-    plt.savefig(run_dir / "plots" / "p1_loss.png")
+    plt.savefig(run_dir / "plots" / "p1_loss.png", bbox_inches='tight')
 
 #%% Visualise Reconstructions
 

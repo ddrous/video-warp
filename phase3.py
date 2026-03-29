@@ -238,7 +238,7 @@ ax.set_ylabel('Loss')
 ax.set_yscale('log')
 ax.set_title('Phase 3 Training Loss')
 plt.draw()
-plt.savefig(run_dir / "plots" / "p3_loss.png")
+plt.savefig(run_dir / "plots" / "p3_loss.png", bbox_inches='tight')
 
 
 #%% Generative Evaluation & Rollout

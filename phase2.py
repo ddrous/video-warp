@@ -289,7 +289,7 @@ ax.set_ylabel('Loss')
 ax.set_yscale('log')
 ax.set_title('Phase 2 Training Loss')
 plt.draw()
-plt.savefig(run_dir / "plots" / "p2_loss.png")
+plt.savefig(run_dir / "plots" / "p2_loss.png", bbox_inches='tight')
 
 
 #%% Visualisations
