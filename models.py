@@ -66,6 +66,44 @@ class WeightCNN(eqx.Module):
         offset = self.layers[-1](x)
         return offset
 
+
+# class WeightCNN(eqx.Module): ## TODO Bottleneck
+#     layers: list
+#     theta_base: jax.Array
+
+#     def __init__(self, in_channels, out_dim, spatial_shape, theta_base, key, hidden_width=32, depth=4):
+#         self.theta_base = theta_base
+#         H, W = spatial_shape
+#         keys = jax.random.split(key, depth + 1)
+        
+#         conv_layers = []
+#         current_in = in_channels
+#         current_out = hidden_width
+        
+#         for i in range(depth):
+#             conv_layers.append(
+#                 eqx.nn.Conv2d(current_in, current_out, kernel_size=3, stride=2, padding=1, key=keys[i])
+#             )
+#             current_in = current_out
+#             current_out *= 2
+            
+#         dummy_x = jnp.zeros((in_channels, H, W))
+#         for layer in conv_layers:
+#             dummy_x = layer(dummy_x)
+
+#         flat_dim = dummy_x.reshape(-1).shape[0]
+#         # self.layers = conv_layers + [eqx.nn.Linear(flat_dim, out_dim, key=keys[depth])]
+#         self.layers = conv_layers + [eqx.nn.Linear(flat_dim, 8, key=keys[depth]), eqx.nn.Linear(8, out_dim//4, key=keys[depth]), eqx.nn.Linear(out_dim//4, out_dim//2, key=keys[depth]), eqx.nn.Linear(out_dim//2, out_dim, key=keys[depth])]
+
+#     def __call__(self, x):
+#         for layer in self.layers[:-4]:
+#             x = jax.nn.relu(layer(x))
+#         x = x.reshape(-1)
+#         for layer in self.layers[-4:-1]:
+#             x = jax.nn.relu(layer(x))
+#         offset= self.layers[-1](x)
+#         return offset
+
 class ForwardDynamicsModule(eqx.Module):
     mlp_A: Optional[eqx.nn.MLP]
     mlp_B: Optional[eqx.nn.MLP]

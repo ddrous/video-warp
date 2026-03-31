@@ -26,7 +26,7 @@ phase_1:
   print_every: 1
   batch_size: 16
   learning_rate: 1.0e-5
-  encoder_sees_test: True
+  encoder_sees_test: true
   mse_weight: 1.0
   # Phase 1 LR Scheduler
   lr_patience: 50

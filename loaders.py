@@ -243,8 +243,8 @@ def get_dataloaders(config, phase="phase_1"):
         test_dataset = Subset(test_dataset, range(min(2, len(test_dataset))))
         batch_size = min(2, batch_size)
 
-    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=numpy_collate, drop_last=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=numpy_collate, drop_last=False)
+    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, collate_fn=numpy_collate, drop_last=False, num_workers=0)   ##TODO: Set num_workers=0 for debugging to avoid multiprocessing issues in some environments (e.g. JAX, Jupyter notebooks)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, collate_fn=numpy_collate, drop_last=False, num_workers=0)
     
     return train_loader, test_loader
 
