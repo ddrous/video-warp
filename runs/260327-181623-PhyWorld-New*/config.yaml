@@ -39,7 +39,7 @@ phase_2:
   train_encoder: false
 phase_3:
   batch_size: 64
-  gcm_type: transformer
+  gcm_type: lstm
   learning_rate: 1.0e-05
   loss_type: L2
   lr_accum_size: 5
@@ -48,7 +48,7 @@ phase_3:
   lr_min_scale: 1.0
   lr_patience: 500
   lr_rtol: 0.0001
-  nb_epochs: 100
+  nb_epochs: 300
   num_actions: 5
   print_every: 1
 root_activation: relu
