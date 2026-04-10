@@ -1,0 +1,84 @@
+# ================================================================
+# Genie-Continuous: Configuration for MovingMNIST
+# Continuous-action variant of Genie (Bruce et al., 2024)
+# ================================================================
+
+dataset: "MovingMNIST"
+data_path: "../data"      # relative to genie/ folder
+seed: 2026
+debug: false
+
+# ================================================================
+# Architecture
+# ================================================================
+
+# Tokenizer (Encoder / Decoder)
+cnn_hidden_width: 64          # base channel width for CNN encoder
+cnn_depth: 4                  # number of strided conv layers
+latent_dim: 962               # d_z: dimensionality of per-frame latent z_t
+
+# Action / LAM
+action_dim: 32                # d_u: dimensionality of continuous action u_t
+
+# Dynamics Transformer
+dyn_d_model: 128              # Transformer model dimension
+dyn_num_heads: 4              # Multi-head attention heads
+dyn_num_layers: 4             # Number of causal Transformer blocks
+dyn_ffn_mult: 4               # FFN hidden = d_model * ffn_mult
+dyn_dropout: 0.0              # Dropout (set 0 for deterministic JAX)
+
+# Generative Control Model (GCM) — Phase 3
+gcm_type: "GRU"               # "GRU" | "LSTM" | "Transformer"
+gcm_hidden: 256               # Hidden dimension of the GCM RNN
+gcm_num_layers: 1             # Number of GCM RNN layers (if transformer: attention layers)
+
+# ================================================================
+# Phase 1: Tokenizer Pre-training (Encoder + Decoder)
+# ================================================================
+phase_1:
+  nb_epochs: 30
+  print_every: 5
+  batch_size: 128
+  learning_rate: 1.0e-4
+  # LR Scheduler
+  lr_patience: 10
+  lr_factor: 0.5
+  lr_cooldown: 5
+  lr_min_scale: 0.01
+
+# ================================================================
+# Phase 2: Dynamics Training (IDM + Dynamics Transformer)
+# ================================================================
+phase_2:
+  nb_epochs: 3000
+  print_every: 50
+  batch_size: 64
+  learning_rate: 1.0e-5
+  loss_type: "latent"          # "latent" (in z-space) or "pixel"
+  train_encoder: false         # freeze encoder from phase 1
+  reverse_aug: true            # reverse-video augmentation
+  static_aug: true             # static-prepend augmentation
+  context_ratio: 0.5           # fraction of steps using IDM (vs zero-action)
+  # LR Scheduler
+  lr_patience: 200
+  lr_factor: 0.5
+  lr_cooldown: 10
+  lr_min_scale: 0.01
+
+# ================================================================
+# Phase 3: GCM Training + Inference
+# ================================================================
+phase_3:
+  nb_epochs: 50
+  print_every: 5
+  batch_size: 32
+  learning_rate: 5.0e-5
+  # Inference settings
+  context_steps: 10            # number of context frames (IDM-driven)
+  rollout_steps: 10            # number of autonomous steps (GCM-driven)
+  num_vis_sequences: 5         # sequences to visualise
+  # LR Scheduler
+  lr_patience: 20
+  lr_factor: 0.5
+  lr_cooldown: 10
+  lr_min_scale: 0.01

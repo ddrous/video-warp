@@ -1105,6 +1105,7 @@ if TRAIN_PHASE_1:
     )
     
     print(f"Total Trainable Parameters in Phase 1 WARP: {count_trainable_params(model_p1)}")
+    print(f"  - Number of paramters in dtheta (Root MLP): {model_p1.d_theta}", flush=True)
 
     optimizer_p1 = optax.chain(
         optax.adam(CONFIG["p1_learning_rate"]),
@@ -1361,6 +1362,8 @@ if not TRAIN_PHASE_2:
         split_forward=CONFIG["split_forward"], key=subkey, phase=2
     )
     model_final = eqx.tree_deserialise_leaves(artefacts_path / "model_phase2_final.eqx", model_final)
+
+    print(f"  - Number of paramters in root (dtheta): {model_final.d_theta}", flush=True)
 
 @eqx.filter_jit
 def evaluate(m, batch, coords, context_ratio):

@@ -45,3 +45,6 @@ runs/*/*
 !runs/260318-174150-PhyWorld*/config.yaml
 !runs/260312-113749-PerfectMNIST*/main.py
 !runs/260316-202801-MiniGrid-Easy*/config.yaml
+
+
+genie/plots/*
