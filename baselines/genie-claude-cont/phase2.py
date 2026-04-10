@@ -29,13 +29,13 @@ import numpy as np
 import yaml
 import time
 import matplotlib
-matplotlib.use("Agg")
+# matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pathlib import Path
 
 from loaders import get_dataloaders
 from utils import plot_videos, count_trainable_params
-from genie.models import Genie
+from genie.gemini.models import Genie
 
 
 #%%
@@ -189,6 +189,7 @@ def train_step(model, videos_batch, aug_key):
     new_trainable = optax.apply_updates(
         eqx.filter(model, filter_spec), updates)
     new_model = eqx.combine(new_trainable, frozen_model)
+
     return new_model, new_opt_state, loss
 
 
@@ -197,12 +198,27 @@ def eval_step(model, videos_batch):
     """videos_batch: (B, T, H, W, C)"""
     losses, z_pred_seq, z_gt_seq = jax.vmap(p2_forward, in_axes=(None, 0))(
         model, videos_batch)
+
     ## Decode
     recon_pred = jax.vmap(
         lambda z_seq: jax.vmap(model.decode, in_axes=(0, None))(
             z_seq, videos_batch.shape[2:]))(z_pred_seq)  # (B, T-1, H, W, C)
+    # return losses, recon_pred, videos_batch[:, 1:]
 
-    return losses, recon_pred, videos_batch[:, 1:]
+    gt_recon = jax.vmap(
+        lambda z_seq: jax.vmap(model.decode, in_axes=(0, None))(
+            z_seq, videos_batch.shape[2:]))(z_gt_seq)  # (B, T-1, H, W, C)
+    # return losses, recon_pred, gt_recon
+
+    ## We need to add one frame to recon_pred to match the original video length (T)
+    # We can use the first frame's GT reconstruction as the "predicted" first frame
+    first_frame_recon = jax.vmap(model.decode, in_axes=(0, None))(
+        jax.vmap(lambda v: model.encode(v[0]))(videos_batch), videos_batch.shape[2:])  # (B, H, W, C)
+    recon_pred_full = jnp.concatenate(
+        [first_frame_recon[:, None], recon_pred], axis=1)  # (B, T, H, W, C)
+    
+    # return losses, recon_pred_full, gt_recon
+    return losses, recon_pred_full, videos_batch
 
 # ─────────────────────────────────────────────────────────────────
 # Training Loop
@@ -231,10 +247,10 @@ for epoch in range(1, p2_cfg["nb_epochs"] + 1):
         batch = jnp.array(batch)
         losses, _, _ = jax.vmap(p2_forward, in_axes=(None, 0))(model, batch)
         val_ls.append(float(jnp.mean(losses)))
-        test_losses.append(float(jnp.mean(losses)))
+        # test_losses.append(float(jnp.mean(losses)))
 
     # train_losses.append(np.mean(batch_ls))
-    # test_losses.append(np.mean(val_ls))
+    test_losses.append(np.mean(val_ls))
 
     if epoch % p2_cfg["print_every"] == 0 or epoch == 1:
         print(f"Epoch {epoch:3d}/{p2_cfg['nb_epochs']} | "
@@ -243,7 +259,6 @@ for epoch in range(1, p2_cfg["nb_epochs"] + 1):
               f"[{time.time()-t0:.1f}s]", flush=True)
 
     if epoch % max(1, p2_cfg["nb_epochs"] // 10) == 0 or epoch == p2_cfg["nb_epochs"]-1:
-        print("Recon shape:", sample_batch.shape, flush=True)
         recon, gt_frames = eval_step(model, sample_batch)[1:]
 
         plot_videos(
@@ -272,9 +287,14 @@ print(f"\n✅  Saved Phase-2 model to {ARTIFACTS}/genie_phase2.eqx")
 # ─────────────────────────────────────────────────────────────────
 # Loss curve
 # ─────────────────────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(7, 4))
+fig, ax = plt.subplots(figsize=(8, 5))
 ax.plot(train_losses, label="Train", linewidth=2)
-ax.plot(test_losses,  label="Val",   linewidth=2, linestyle="--")
+# ax.plot(test_losses,  label="Val",   linewidth=2, linestyle="--")
+
+## Calculate the x for t test_losses (one for each epoch, not each batch)
+test_x = np.linspace(0, len(train_losses)-1, len(test_losses))
+ax.plot(test_x, test_losses, label="Val", linewidth=2, linestyle="--")
+
 ax.set_xlabel("Train Steps"); ax.set_ylabel("Latent MSE")
 ax.set_title("Phase 2 — IDM + Dynamics Transformer Loss")
 ax.set_yscale("log")
@@ -324,4 +344,5 @@ def _vis_rollout_latent(model, loader, n=4,
 
 # _vis_rollout_latent(model, test_loader)
 print("\nPhase 2 complete.\n")
+
 

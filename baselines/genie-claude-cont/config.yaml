@@ -6,7 +6,7 @@
 dataset: "MovingMNIST"
 data_path: "../data"      # relative to genie/ folder
 seed: 2026
-debug: false
+debug: true
 
 # ================================================================
 # Architecture
@@ -50,20 +50,20 @@ phase_1:
 # Phase 2: Dynamics Training (IDM + Dynamics Transformer)
 # ================================================================
 phase_2:
-  nb_epochs: 3000
-  print_every: 50
+  nb_epochs: 1000
+  print_every: 500
   batch_size: 64
-  learning_rate: 1.0e-5
+  learning_rate: 1.0e-4
   loss_type: "latent"          # "latent" (in z-space) or "pixel"
   train_encoder: false         # freeze encoder from phase 1
   reverse_aug: true            # reverse-video augmentation
   static_aug: true             # static-prepend augmentation
-  context_ratio: 0.5           # fraction of steps using IDM (vs zero-action)
+  context_ratio: 1.0           # fraction of steps using IDM (vs zero-action)
   # LR Scheduler
   lr_patience: 200
   lr_factor: 0.5
   lr_cooldown: 10
-  lr_min_scale: 0.01
+  lr_min_scale: 1.0
 
 # ================================================================
 # Phase 3: GCM Training + Inference

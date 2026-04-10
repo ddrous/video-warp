@@ -1,0 +1,95 @@
+# ================================================================
+# Genie: Generative Interactive Environments
+# Faithful Implementation of Bruce et al., ICML 2024
+# ================================================================
+
+dataset: "MovingMNIST"
+data_path: "../data"      
+seed: 2026
+debug: false
+
+# ================================================================
+# Architecture - Spatiotemporal Models
+# ================================================================
+
+# Video Tokenizer (ST-ViViT style)
+tok_patch_size: 4          # not used (CNN based)
+vq_dim: 128                 # VQ embedding dimension
+frame_codebook_size: 4096  # K_frame
+vq_beta: 0.25
+
+# CNN encoder/decoder depths and widths
+cnn_hidden_width: 64
+cnn_depth: 4
+
+# Latent Action Model (IDM) - operates on pixels
+action_codebook_size: 8    # K_action
+action_dim: 32
+action_beta: 0.25
+idm_hidden_dim: 128
+idm_depth: 3
+
+# Dynamics Model (Causal Transformer)
+dyn_d_model: 512
+dyn_num_heads: 8
+dyn_num_layers: 6
+dyn_ffn_mult: 4
+max_seq_len: 40
+
+# Generative Control Module (GCM)
+gcm_type: "GRU"            # GRU, LSTM, RNN, TRANSFORMER
+gcm_mem_dim: 256
+gcm_num_heads: 4
+gcm_num_layers: 3
+gcm_max_len: 40
+
+# MaskGIT parameters
+maskgit_steps: 10
+
+# ================================================================
+# Phase 1: Video Tokenizer Training
+# ================================================================
+phase_1:
+  nb_epochs: 2
+  print_every: 1
+  batch_size: 32
+  learning_rate: 1.0e-4
+  lr_patience: 5
+  lr_factor: 0.5
+  lr_cooldown: 3
+  lr_min_scale: 1.0
+
+# ================================================================
+# Phase 2: LAM + Dynamics Co-Training
+# ================================================================
+phase_2:
+  nb_epochs: 100
+  batch_size: 16
+  learning_rate: 1.0e-4
+  lam_loss_weight: 1.0
+  lam_vq_weight: 0.1
+  dyn_loss_weight: 1.0
+  lr_patience: 10
+  lr_factor: 0.5
+  lr_cooldown: 5
+  lr_min_scale: 0.01
+  print_every: 5
+
+# ================================================================
+# Phase 3: GCM Training & Evaluation
+# ================================================================
+phase_3:
+  nb_epochs: 50
+  batch_size: 32
+  learning_rate: 5.0e-4
+  gcm_loss_weight: 1.0
+  lr_patience: 5
+  lr_factor: 0.5
+  lr_cooldown: 3
+  lr_min_scale: 0.01
+  print_every: 5
+  context_steps: 4
+  rollout_steps: 12
+  num_vis_sequences: 5
+  num_swap_pairs: 4
+  swap_step: 6

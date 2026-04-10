@@ -36,7 +36,7 @@ from pathlib import Path
 
 from loaders import get_dataloaders
 from utils import plot_videos, count_trainable_params
-from genie.models import Genie
+from genie.gemini.models import Genie
 
 # ─────────────────────────────────────────────────────────────────
 with open("config.yaml", "r") as f:

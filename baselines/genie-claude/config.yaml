@@ -1,0 +1,87 @@
+# ================================================================
+# Genie (Discrete): Configuration for MovingMNIST
+# Original Genie (Bruce et al., ICML 2024) with discrete VQ tokens
+# ================================================================
+
+dataset: "MovingMNIST"
+data_path: "../data"      # relative to genie/ folder
+seed: 2026
+debug: true
+
+# ================================================================
+# Architecture
+# ================================================================
+
+# VQ-VAE Tokenizer
+cnn_hidden_width: 64      # base channel width for CNN encoder
+cnn_depth: 4              # number of strided conv layers (64->4 spatial)
+vq_dim: 962                # dimension of each VQ embedding vector
+frame_codebook_size: 128  # K_frame: number of frame token entries
+vq_beta: 0.25             # commitment loss weight (beta in VQ-VAE paper)
+
+# Latent Action Model (LAM / IDM)
+action_dim: 64            # internal dimension of action MLP output (before VQ)
+action_codebook_size: 16   # K_action: number of discrete action tokens
+action_beta: 0.25         # commitment loss weight for action VQ
+
+# Dynamics Transformer
+dyn_d_model: 128          # Transformer model dimension
+dyn_num_heads: 4          # Multi-head attention heads
+dyn_num_layers: 4         # Number of causal Transformer blocks
+dyn_ffn_mult: 4           # FFN hidden = d_model * ffn_mult
+
+# Generative Control Model (GCM) — Phase 3
+gcm_hidden: 256           # Hidden dimension of the GCM GRU
+
+# ================================================================
+# Phase 1: VQ-VAE Pre-training (Encoder + VQ + Decoder)
+# ================================================================
+phase_1:
+  nb_epochs: 30
+  print_every: 10        # print every N train steps
+  vis_every: 10         # visualise every N train steps
+  batch_size: 128
+  learning_rate: 1.0e-4
+  lr_patience: 5
+  lr_factor: 0.5
+  lr_cooldown: 3
+  lr_min_scale: 0.01
+
+# ================================================================
+# Phase 2: Dynamics Training (IDM + Dynamics Transformer)
+#   Loss: CE on frame tokens + VQ commitment on action tokens
+# ================================================================
+phase_2:
+  nb_epochs: 200
+  print_every: 200        # print every N train steps
+  vis_every: 2000         # visualise every N train steps
+  batch_size: 64
+  learning_rate: 1.0e-4
+  train_encoder: false    # freeze VQ-VAE from phase 1
+  reverse_aug: true
+  static_aug: true
+  dyn_loss_weight: 1.0    # weight for cross-entropy dynamics loss
+  idm_loss_weight: 0.1    # weight for IDM VQ commitment loss
+  lr_patience: 30
+  lr_factor: 0.5
+  lr_cooldown: 10
+  lr_min_scale: 0.01
+
+# ================================================================
+# Phase 3: GCM Training + Inference + State-Swap Experiment
+# ================================================================
+phase_3:
+  nb_epochs: 100
+  print_every: 200
+  vis_every: 1000
+  batch_size: 32
+  learning_rate: 1.0e-5
+  context_steps: 10       # IDM-driven steps at inference
+  rollout_steps: 10       # GCM-driven steps at inference
+  num_vis_sequences: 5
+  num_swap_pairs: 4       # pairs for state-swap experiment
+  swap_step: 5            # timestep at which to swap
+  lr_patience: 15
+  lr_factor: 0.5
+  lr_cooldown: 5
+  lr_min_scale: 0.01

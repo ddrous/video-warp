@@ -47,4 +47,10 @@ runs/*/*
 !runs/260316-202801-MiniGrid-Easy*/config.yaml
 
 
-genie/plots/*
+baselines/genie-plots/*
+baselines/genie-claude-cont/artefacts/*
+baselines/genie-claude-cont/plots/*
+baselines/genie-claude/artefacts/*
+baselines/genie-claude/plots/*
+baselines/genie-gemini/artefacts/*
+baselines/genie-gemini/plots/*
