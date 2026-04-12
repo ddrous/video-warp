@@ -51,7 +51,7 @@ CONFIG = {
     "seed": 42,
     
     # Phase 1 Params
-    "p1_nb_epochs": 1500,        
+    "p1_nb_epochs": 100,        
     "p1_learning_rate": 1e-4 if USE_NLL_LOSS else 1e-4,
     "reverse_video_aug": True,
     "static_video_aug": True,
@@ -63,10 +63,10 @@ CONFIG = {
 
     # Phase 2 Params
     # "p2_nb_epochs": 1500,
-    "p2_nb_epochs": 1000,
+    "p2_nb_epochs": 100,
     "p2_learning_rate": 1e-4,
 
-    "print_every": 10,
+    "print_every": 1,
     "batch_size": 2 if SINGLE_BATCH else 128*2,
     "inf_context_ratio": 0.5,
     "use_nll_loss": USE_NLL_LOSS,

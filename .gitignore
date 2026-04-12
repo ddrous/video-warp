@@ -57,3 +57,8 @@ baselines/genie-gemini/plots/*
 
 
 baselines/runs/*
+
+
+*.npz
+
+

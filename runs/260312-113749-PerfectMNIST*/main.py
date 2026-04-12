@@ -246,32 +246,17 @@ def plot_pred_ref_videos_rollout(video, ref_video, title="Render", save_name=Non
 
 
 def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_labels=True, forecast_start=None, 
-                                 vmin=None, vmax=None, save_name=None, 
-                                 wspace=0.05, hspace=0.05, forecast_gap=0.2, 
-                                 save_video=False, video_gap=5):
+                vmin=None, vmax=None, save_name=None, 
+                wspace=0.05, hspace=0.02, forecast_gap=0.2, 
+                save_video=False, video_gap=5, show_borders=False, corner_radius=5,
+                no_rescale=True, cmap='coolwarm', row_height="auto", gif_scale=4):
     """
-    Plots a camera-ready rollout of ground truth and predicted video frames.
-    
-    Args:
-        video (np.ndarray): Predicted video frames of shape (T, H, W, C).
-        ref_video (np.ndarray, optional): Ground truth video frames of shape (T, H, W, C).
-        plot_ref (bool): Whether to plot the ground truth reference row (Top).
-        show_titles (bool): Whether to show time steps and side labels.
-        forecast_start (int, optional): The 1-indexed time step where forecasting begins.
-        vmin (float, optional): Min intensity scale (only applies if plot_ref=False).
-        vmax (float, optional): Max intensity scale (only applies if plot_ref=False).
-        save_name (str, optional): Path to save the figure.
-        wspace (float): Horizontal spacing between frames.
-        hspace (float): Vertical spacing between rows.
-        forecast_gap (float): The width of the gap indicating the forecast start (relative to frame width).
-        save_video (bool): If True, also exports a GIF.
-        video_gap (int): Pixel height of the gap separating GT and Pred in the GIF.
+    Plots a camera-ready rollout of ground truth and predicted video frames, 
+    and saves a high-res, properly scaled GIF.
     """
-    # Modern, "techy" font setup (clean sans-serif commonly used in ML papers)
     with plt.rc_context({
         'font.family': 'sans-serif',
         'font.sans-serif': ['Helvetica Neue', 'Helvetica', 'Arial', 'DejaVu Sans'],
-        # 'font.sans-serif': ['DejaVu', 'Helvetica Neue', 'Helvetica', 'DejaVu Sans'],
         'font.size': 18,
         'pdf.fonttype': 42,
         'ps.fonttype': 42
@@ -283,17 +268,17 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
         if plot_ref and ref_video is None:
             raise ValueError("ref_video must be provided if plot_ref is True.")
 
-        # Handle normalization
         rescale = False
         if plot_ref and ref_video[..., :C].min() < -0.5:
             rescale = True
             ref_video = (ref_video + 1.0) / 2.0
         elif not plot_ref and video.min() < -0.5:
             rescale = True
+        
+        if no_rescale:
+            rescale = False
 
         nrows = 2 if plot_ref else 1
-        
-        # Layout math: Create a spacer column if a forecast start is defined
         has_gap = forecast_start is not None and 1 < forecast_start <= nb_frames
         ncols = nb_frames + 1 if has_gap else nb_frames
         
@@ -303,180 +288,219 @@ def plot_videos(video, ref_video=None, plot_ref=True, show_titles=True, show_lab
             spacer_col = forecast_start - 1
             width_ratios[spacer_col] = forecast_gap
 
-        # Apply the parameterized forecast gap to the figure width
+        # Base width calculation
         fig_width = (nb_frames + (forecast_gap if has_gap else 0.0)) * 1.5
-        fig = plt.figure(figsize=(fig_width, nrows * 1.55))
         
-        # Apply the parameterized wspace and hspace
+        if row_height == "auto":
+            H, W = video.shape[1:3]
+            aspect = H / W
+            calculated_row_height = aspect * 1.2 if show_titles else aspect * 1.5
+            title_buffer = 0.5 if show_titles else 0.1
+            fig_height = (nrows * calculated_row_height) + title_buffer
+        else:
+            fig_height = nrows * float(row_height)
+        
+        fig = plt.figure(figsize=(fig_width, fig_height))
         gs = fig.add_gridspec(nrows, ncols, wspace=wspace, hspace=hspace, width_ratios=width_ratios)
-        
         axes = np.empty((nrows, ncols), dtype=object)
         for r in range(nrows):
             for c in range(ncols):
                 axes[r, c] = fig.add_subplot(gs[r, c])
 
-        # Configure kwargs for pure predictions
-        imshow_kwargs = {}
-        if not plot_ref:
-            if vmin is not None: imshow_kwargs['vmin'] = vmin
-            if vmax is not None: imshow_kwargs['vmax'] = vmax
+        # Establish Global Min/Max
+        if vmin is None or vmax is None:
+            if plot_ref:
+                global_min = ref_video.min()
+                global_max = ref_video.max()
+            else:
+                global_min = video.min()
+                global_max = video.max()
+
+            if vmin is None: vmin = global_min
+            if vmax is None: vmax = global_max
+
+        imshow_kwargs = {'cmap': cmap, 'vmin': vmin, 'vmax': vmax}
 
         frame_idx = 0
         for c in range(ncols):
-            # 1. Handle Spacer Column
             if c == spacer_col:
                 for r in range(nrows):
                     axes[r, c].axis('off')
                 continue
                 
-            # 2. Prepare Frames
             pred_frame = video[frame_idx]
             if rescale: pred_frame = (pred_frame + 1.0) / 2.0
             
-            # Only strictly clip if the user isn't supplying custom vmin/vmax overrides
-            if plot_ref or (vmin is None and vmax is None):
+            # Fix: Only clip if RGB. Let imshow handle scalar arrays natively.
+            if pred_frame.shape[-1] in [3, 4]:
                 pred_frame = np.clip(pred_frame, 0.0, 1.0)
-            
-            if pred_frame.shape[-1] == 1: pred_frame = np.repeat(pred_frame, 3, axis=-1)
+            elif pred_frame.shape[-1] == 1:
+                pred_frame = pred_frame[..., 0]
 
             if plot_ref:
                 ref_idx = min(frame_idx, ref_video.shape[0] - 1)
                 ref_frame = ref_video[ref_idx]
                 if rescale: ref_frame = (ref_frame + 1.0) / 2.0
-                ref_frame = np.clip(ref_frame, 0.0, 1.0)
-                if ref_frame.shape[-1] == 1: ref_frame = np.repeat(ref_frame, 3, axis=-1)
+                
+                if ref_frame.shape[-1] in [3, 4]:
+                    ref_frame = np.clip(ref_frame, 0.0, 1.0)
+                elif ref_frame.shape[-1] == 1:
+                    ref_frame = ref_frame[..., 0]
 
-            # 3. Render Images
             if plot_ref:
-                axes[0, c].imshow(ref_frame)
-                axes[1, c].imshow(pred_frame)
-                target_axes = [axes[0, c], axes[1, c]]
+                im_ref  = axes[0, c].imshow(ref_frame,  **imshow_kwargs)
+                im_pred = axes[1, c].imshow(pred_frame, **imshow_kwargs)
+                target_axes = [(axes[0, c], im_ref, ref_frame), (axes[1, c], im_pred, pred_frame)]
             else:
-                axes[0, c].imshow(pred_frame, **imshow_kwargs)
-                target_axes = [axes[0, c]]
+                im_pred = axes[0, c].imshow(pred_frame, **imshow_kwargs)
+                target_axes = [(axes[0, c], im_pred, pred_frame)]
 
-            # 4. Clean up axes (removes outlines)
-            for ax in target_axes:
+            for ax, im_obj, frame_data in target_axes:
                 ax.set_xticks([])
                 ax.set_yticks([])
+                
+                h, w = frame_data.shape[:2]
                 for spine in ax.spines.values():
                     spine.set_visible(False)
+                    
+                if show_borders:
+                    rect = patches.FancyBboxPatch(
+                        (-0.5, -0.5), w, h,
+                        boxstyle=f"round,pad=0,rounding_size={corner_radius}", 
+                        linewidth=1.2, edgecolor='black', facecolor='none',
+                        transform=ax.transData
+                    )
+                    ax.add_patch(rect)
+                    im_obj.set_clip_path(rect)
 
-            # 5. Handle Time Indices
             if show_titles:
                 top_ax = axes[0, c]
-                if frame_idx == 0 or (frame_idx + 1 == forecast_start):
-                    title_str = f"$t={frame_idx + 1}$"
-                else:
-                    title_str = str(frame_idx + 1)
-                
+                title_str = f"$t={frame_idx + 1}$" if (frame_idx == 0 or (frame_idx + 1 == forecast_start)) else str(frame_idx + 1)
                 font_weight = 'bold' if (has_gap and frame_idx + 1 == forecast_start) else 'normal'
                 top_ax.set_title(title_str, pad=8, fontsize=18, fontweight=font_weight)
 
             frame_idx += 1
 
-        # 6. Add Large Row Labels before the sequence
         if show_labels:
             if plot_ref:
-                axes[0, 0].set_ylabel("GT", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
-                axes[1, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
-            else:
-                axes[0, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
+                axes[0, 0].set_ylabel("GT",   rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
+            axes[-1, 0].set_ylabel("Pred", rotation=0, labelpad=25, ha='right', va='center', fontsize=28, fontweight='bold')
 
         if save_name:
             plt.savefig(save_name, dpi=100, bbox_inches='tight', facecolor='white', transparent=False)
-        
-        plt.show()
-        plt.close()
+        else:
+            plt.draw()
+
+        try:
+            from IPython.display import display
+            display(fig)
+        except ImportError:
+            plt.show()
+            
+        plt.close(fig)
 
         # ---------------------------------------------------------
-        # 7. GIF / Video Generation (With Top Labels)
+        # GIF Generation
         # ---------------------------------------------------------
         if save_video and save_name is not None:
-            # Setup Font for Video Header
+            
+            # Scale fonts up based on gif_scale
             try:
-                # Try common system fonts for large text
-                # font = ImageFont.truetype("arial.ttf", 24)
-                font = ImageFont.truetype("Helvetica.ttc", 14)
+                font = ImageFont.truetype("arial.ttf", 14 * gif_scale)
             except IOError:
                 try:
-                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+                    font = ImageFont.truetype("DejaVuSans-Bold.ttf", 14 * gif_scale)
                 except IOError:
                     font = ImageFont.load_default()
 
-            gif_frames = []
-            for t in range(nb_frames):
+            def process_pil_image(img_array, radius=corner_radius, apply_frame=show_borders):
+                h, w = img_array.shape[:2]
+                img = Image.fromarray((img_array * 255).astype(np.uint8))
                 
-                # Format Prediction Frame for GIF
+                # Resize the underlying image using NEAREST to maintain sharp grid pixels
+                new_w, new_h = w * gif_scale, h * gif_scale
+                img = img.resize((new_w, new_h), Image.NEAREST)
+                
+                if not apply_frame: return img
+                
+                scaled_radius = radius * gif_scale
+                mask = Image.new("L", (new_w, new_h), 0)
+                draw = ImageDraw.Draw(mask)
+                draw.rounded_rectangle((0, 0, new_w, new_h), radius=scaled_radius, fill=255)
+                
+                rounded_img = Image.new("RGB", (new_w, new_h), "white")
+                rounded_img.paste(img, (0, 0), mask=mask)
+                
+                draw_border = ImageDraw.Draw(rounded_img)
+                draw_border.rounded_rectangle((0, 0, new_w-1, new_h-1), radius=scaled_radius, outline="black", width=max(1, gif_scale//2))
+                return rounded_img
+
+            def apply_cmap_to_frame(frame, v_min, v_max):
+                # Fix: If the frame is already RGB/RGBA, do NOT apply a colormap
+                if frame.ndim == 3 and frame.shape[-1] in [3, 4]:
+                    # Clip to [0, 1] to be safe, then return the RGB channels
+                    return np.clip(frame[..., :3], 0.0, 1.0)
+                    
+                # If it's a single channel, squeeze it for the colormap
+                if frame.ndim == 3 and frame.shape[-1] == 1: 
+                    frame = frame[..., 0]
+                    
+                norm = plt.Normalize(vmin=v_min, vmax=v_max)
+                colormap = plt.get_cmap(cmap)
+                return colormap(norm(frame))[..., :3]
+
+            gif_frames = []
+            scaled_gap = video_gap * gif_scale
+            header_height = 20 * gif_scale
+
+            for t in range(nb_frames):
                 p_f = video[t]
                 if rescale: p_f = (p_f + 1.0) / 2.0
-                
-                if not plot_ref and (vmin is not None or vmax is not None):
-                    # Manually apply vmin/vmax normalization for the GIF
-                    v_min = vmin if vmin is not None else p_f.min()
-                    v_max = vmax if vmax is not None else p_f.max()
-                    p_f = (p_f - v_min) / (v_max - v_min + 1e-8)
-                
-                p_f = np.clip(p_f, 0.0, 1.0)
-                if p_f.shape[-1] == 1: p_f = np.repeat(p_f, 3, axis=-1)
+                p_f = apply_cmap_to_frame(p_f, vmin, vmax)
 
                 if plot_ref:
-                    # Format Reference Frame for GIF
                     r_idx = min(t, ref_video.shape[0] - 1)
                     r_f = ref_video[r_idx]
                     if rescale: r_f = (r_f + 1.0) / 2.0
-                    r_f = np.clip(r_f, 0.0, 1.0)
-                    if r_f.shape[-1] == 1: r_f = np.repeat(r_f, 3, axis=-1)
+                    r_f = apply_cmap_to_frame(r_f, vmin, vmax)
                     
-                    # Create a white spacer block (gap) between the GT and Pred horizontally
-                    gap_block = np.ones((r_f.shape[0], video_gap, 3), dtype=r_f.dtype)
+                    img_ref  = process_pil_image(r_f)
+                    img_pred = process_pil_image(p_f)
                     
-                    # Stack them horizontally: GT (left), Gap, Prediction (right)
-                    combined_frame = np.concatenate([r_f, gap_block, p_f], axis=1)
+                    combined_w = img_ref.width + scaled_gap + img_pred.width
+                    combined_h = max(img_ref.height, img_pred.height)
+                    combined_frame = Image.new('RGB', (combined_w, combined_h), 'white')
+                    combined_frame.paste(img_ref,  (0, 0))
+                    combined_frame.paste(img_pred, (img_ref.width + scaled_gap, 0))
                 else:
-                    combined_frame = p_f
+                    combined_frame = process_pil_image(p_f)
 
-                # Convert float [0, 1] arrays to uint8 [0, 255] PIL Images
-                frame_uint8 = (combined_frame * 255).astype(np.uint8)
-                base_img = Image.fromarray(frame_uint8)
-
-                # Add Header for text
-                header_height = 15
-                final_img = Image.new('RGB', (base_img.width, base_img.height + header_height), color='white')
-                final_img.paste(base_img, (0, header_height))
+                final_img = Image.new('RGB', (combined_frame.width, combined_frame.height + header_height), color='white')
+                final_img.paste(combined_frame, (0, header_height))
                 
-                # Draw Labels centered above each video stream
                 draw = ImageDraw.Draw(final_img)
+                
                 if plot_ref:
-                    gt_w = r_f.shape[1]
-                    pred_w = p_f.shape[1]
-                    draw.text((gt_w // 2 - 9, 2), "GT", font=font, fill="black")
-                    draw.text((gt_w + video_gap + pred_w // 2 - 15, 2), "Pred", font=font, fill="black")
+                    gt_w = draw.textlength("GT", font=font) if hasattr(draw, 'textlength') else 20 * gif_scale
+                    pred_w = draw.textlength("Pred", font=font) if hasattr(draw, 'textlength') else 30 * gif_scale
+                    
+                    draw.text(((img_ref.width - gt_w) // 2, 2 * gif_scale), "GT", font=font, fill="black")
+                    draw.text((img_ref.width + scaled_gap + (img_pred.width - pred_w) // 2, 2 * gif_scale), "Pred", font=font, fill="black")
                 else:
-                    draw.text((p_f.shape[1] // 2 - 15, 2), "Pred", font=font, fill="black")
+                    pred_w = draw.textlength("Pred", font=font) if hasattr(draw, 'textlength') else 30 * gif_scale
+                    draw.text(((combined_frame.width - pred_w) // 2, 2 * gif_scale), "Pred", font=font, fill="black")
                 
                 gif_frames.append(final_img)
             
-            # Save the sequence to GIF matching the save_name
             gif_path = Path(save_name).with_suffix('.gif')
-            
-            # Export GIF (duration is in ms per frame, 150ms = ~6.6fps)
-            gif_frames[0].save(
-                gif_path, 
-                save_all=True, 
-                append_images=gif_frames[1:], 
-                duration=150, 
-                loop=0
-            )
+            gif_frames[0].save(gif_path, save_all=True, append_images=gif_frames[1:], duration=150, loop=0)
             print(f"Saved rollout animation to {gif_path}")
 
-            # Display the generated GIF inline in the Jupyter Notebook
             try:
                 from IPython.display import Image as IPyImage, display
                 display(IPyImage(filename=str(gif_path)))
             except ImportError:
-                print("IPython is not available to display the GIF inline.")
-
+                pass
 
 
 
@@ -1427,9 +1451,40 @@ plot_videos(
 
 #%% Morphing digits from 8 to 9
 
+corrupt_seq_id = np.random.randint(0, sample_batch.shape[0])
+# corrupt_seq_id = 203
+# corrupt_seq_id = 189
+corrupt_seq_id = 54
+print(f"\nGenerating morphing visualization for corrupt test sequence ID: {corrupt_seq_id}")
+
+## Let's obtain the latent representation for the first sequence in the test set
+@eqx.filter_jit
+def get_latent_representation(model, video):
+    init_frame = video[0]
+    latent = model.encoder(jnp.transpose(init_frame, (2, 0, 1))) # Shape: [lam_dim]
+    return latent
+latent_first = get_latent_representation(model_final, sample_batch[corrupt_seq_id])
+
+print(f"Latent representation of the first frame in the first test sequence: {latent_first.shape}")
+
+## Decode and plot
+@eqx.filter_jit
+def decode_latent(model, latent):
+    time_coord = jnp.array([(1-1)/(20-1)])
+    coords_grid_t = jnp.concatenate([jnp.full_like(coords_grid[..., :1], time_coord), coords_grid], axis=-1)
+    pred_out = model.render_frame(latent, coords_grid_t)
+    return pred_out
+
+decoded_frame = decode_latent(model_final, latent_first)
+plt.imshow(decoded_frame)
+plt.imshow(sample_batch[corrupt_seq_id][0])
+plt.title("Decoded Frame from Latent Representation")
+plt.axis('off')
+plt.draw()
+
 ## We need to rewrite the inference_rollout
 @eqx.filter_jit
-def inference_rollout_morph(model, ref_video, coords_grid, context_ratio=0.0):
+def inference_rollout_morph(model, ref_video, coords_grid, context_ratio=0.0, corrupt=True):
     T = ref_video.shape[0]
     init_frame = ref_video[0]
     
@@ -1458,28 +1513,25 @@ def inference_rollout_morph(model, ref_video, coords_grid, context_ratio=0.0):
             lambda: model.action_model.decode_memory(m_t, step_idx, z_t)
         )
 
-        z_89 = jnp.zeros_like(z_t) # 8 and 9
         # ## Interpolate between the original latent and the zero 89 latent based on the step index (morphing effect)
         # morph_ratio = jnp.clip((step_idx+1 - T//2) / (T//2), 0, 1) # Starts morphing at the halfway point
         # ## Start morphintg immediately but more gradually
         # # morph_ratio = jnp.clip((step_idx+1) / T, 0, 1) # Linear morphing from the start to the end
         # z_t = (1 - morph_ratio) * z_t + morph_ratio * z_89
 
-        z_t = jnp.where(step_idx >= T//2, z_89, z_t) # Abrupt morphing at the halfway point
-
         ## The 4D action encodes the next location on the canvas, 2 for the first digit, 2 for the second.
         ## For the first 10 steps, we want the first to move, and the second to stay put. For the next 10, vice versa. Staying put means reusing the location from the previous step (a_tm1).
     
-        a_t1 = jax.lax.cond(
-            step_idx == 1, # At the first step, we have no previous action, so we just use the current IDM action for both digits
-            lambda: a_t,
-            lambda: jnp.concatenate([a_t[:2], a_tm1[2:]]), # Move the first digit (first 2 action values) and keep the second digit's location the same (last 2 action values)
-        )
-        a_t2 = jax.lax.cond(
-            step_idx == T//2, # At the morphing point, we switch to moving the second digit, so we use the current IDM action for both digits
-            lambda: a_tm1,
-            lambda: jnp.concatenate([a_tm1[:2], a_t[2:]]), # Move the second digit (last 2 action values) and keep the first digit's location the same (first 2 action values)
-        )
+        # a_t1 = jax.lax.cond(
+        #     step_idx == 1, # At the first step, we have no previous action, so we just use the current IDM action for both digits
+        #     lambda: a_t,
+        #     lambda: jnp.concatenate([a_t[:2], a_tm1[2:]]), # Move the first digit (first 2 action values) and keep the second digit's location the same (last 2 action values)
+        # )
+        # a_t2 = jax.lax.cond(
+        #     step_idx == T//2, # At the morphing point, we switch to moving the second digit, so we use the current IDM action for both digits
+        #     lambda: a_tm1,
+        #     lambda: jnp.concatenate([a_tm1[:2], a_t[2:]]), # Move the second digit (last 2 action values) and keep the first digit's location the same (first 2 action values)
+        # )
 
         # a_t1 = jnp.concatenate([a_t[:2], a_tm1[2:]])
         # a_t2 = jnp.concatenate([a_tm1[:2], a_t[2:]])
@@ -1489,8 +1541,9 @@ def inference_rollout_morph(model, ref_video, coords_grid, context_ratio=0.0):
         # a_rd = jax.random.uniform(jax.random.PRNGKey(step_idx), shape=a_t.shape, minval=-2, maxval=2) # Random actions for morphing
         # a_t = jnp.concatenate([a_rd[:2], a_t[2:]])
 
-        a_zeros = jnp.zeros((model.lam_dim,), dtype=z_init.dtype)
-        a_ones = 1*jnp.ones((model.lam_dim,), dtype=z_init.dtype)
+        # a_zeros = jnp.zeros((model.lam_dim,), dtype=z_init.dtype)
+        # a_ones = 1*jnp.ones((model.lam_dim,), dtype=z_init.dtype)
+        
         # a_t = jnp.concatenate([a_zeros[:2], a_ones[2:]])
         # a_t = a_tm1 + 0.01*(a_t - a_tm1) # Smoothly interpolate from the previous action to the current action to create a smoother morphing effect
         # alpha = 0.9985
@@ -1500,7 +1553,22 @@ def inference_rollout_morph(model, ref_video, coords_grid, context_ratio=0.0):
         # a_t = ratio * a_zeros + (1-ratio) * a_t
 
         m_tp1 = model.action_model.encode_memory(m_t, step_idx, z_t, a_t)
+
+
+        # z_89 = jnp.zeros_like(z_t) # 8 and 9
+        z_89 = latent_first
+        if corrupt:
+            # z_t = jnp.where(step_idx >= T//4, z_89, z_t) # Abrupt morphing at the halfway point
+            z_t = jnp.where(step_idx == 5, z_89, z_t) # Abrupt morphing at the halfway point
+
+            # morph_ratio = jnp.clip((step_idx+1) / T, 0, 1) # Linear morphing from the start to the end
+            # z_t = (1 - morph_ratio) * z_t + morph_ratio * z_89
+
+
         z_tp1 = model.forward_dyn(z_t, a_t)
+
+        # m_tp1_c = model.action_model.encode_memory(m_t, step_idx, z_t_c, a_t)
+        # z_tp1_c = model.forward_dyn(z_t_c, a_t)
 
         return (z_tp1, m_tp1, a_t), (a_t, z_t, pred_out)
 
@@ -1512,42 +1580,38 @@ def inference_rollout_morph(model, ref_video, coords_grid, context_ratio=0.0):
 
 # Select one sequence of 8 morphing into 9
 test_seq_id = np.random.randint(0, sample_batch.shape[0])
-# test_seq_id = 233
+test_seq_id = 57
 print(f"\nGenerating morphing visualization for test sequence ID: {test_seq_id} (Digit 8 morphing into 9)")
-final_videos = inference_rollout_morph(model_final, sample_batch[test_seq_id], coords_grid, 0/20)
-
-# plot_videos(
-#     final_videos, 
-#     sample_batch[test_seq_id], 
-#     show_titles=True,
-#     show_labels=False,
-#     plot_ref=False,
-#     forecast_start=11,
-#     forecast_gap=0.2,
-#     hspace=0.02,
-#     wspace=0.02,
-#     # vmin=0,
-#     # vmax=1,
-#     save_name=plots_path / f"inference_control_seq{test_seq_id}.pdf",
-#     save_video=True,
-# )
+final_videos_corrupt = inference_rollout_morph(model_final, sample_batch[test_seq_id], coords_grid, 0/20, corrupt=True)
+final_videos_clean = inference_rollout_morph(model_final, sample_batch[test_seq_id], coords_grid, 0/20, corrupt=False)
 
 plot_videos(
-    final_videos, 
-    sample_batch[test_seq_id], 
+    final_videos_corrupt, 
+    # sample_batch[test_seq_id], 
+    final_videos_clean, 
     show_titles=False,
     show_labels=False,
-    plot_ref=False,
+    plot_ref=True,
     forecast_start=1,
     forecast_gap=0.2,
     hspace=0.02,
     wspace=0.02,
-    # vmin=0,
-    # vmax=1,
+    vmin=0,
+    vmax=1,
     save_name=plots_path / f"inference_control_seq{test_seq_id}.pdf",
     save_video=True,
+    cmap="gray",
 )
 
+## Save all the fames, videos, etc. into a npz array for later use in the paper or website
+np.savez(artefacts_path / f"vwarp_currupt.npz", 
+         corrupt_pred_video=final_videos_corrupt,
+         clean_pred_video=final_videos_clean,
+         ref_video=sample_batch[test_seq_id],
+         corrupt_latent=latent_first,
+         corrupt_frame_pred=decoded_frame,
+         corrupt_frame_ref=sample_batch[corrupt_seq_id, 0],
+         )
 
 
 
