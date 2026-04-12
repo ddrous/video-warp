@@ -54,3 +54,6 @@ baselines/genie-claude/artefacts/*
 baselines/genie-claude/plots/*
 baselines/genie-gemini/artefacts/*
 baselines/genie-gemini/plots/*
+
+
+baselines/runs/*

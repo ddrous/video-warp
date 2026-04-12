@@ -40,8 +40,8 @@ def count_trainable_params(model):
 
 # --- Configuration ---
 TRAIN_PHASE_0 = False  # Optional pretraining of Encoder + Base Theta via autoencoding
-TRAIN_PHASE_1 = False  # Train IDM, FDM, and maybe (Encoder, Base Theta)
-TRAIN_PHASE_2 = False  # Train GCM (Memory Model) to match IDM
+TRAIN_PHASE_1 = True  # Train IDM, FDM, and maybe (Encoder, Base Theta)
+TRAIN_PHASE_2 = True  # Train GCM (Memory Model) to match IDM
 RUN_DIR = "./" if (not TRAIN_PHASE_1 or not TRAIN_PHASE_2) else None
 
 SINGLE_BATCH = False
@@ -51,7 +51,7 @@ CONFIG = {
     "seed": 42,
     
     # Phase 1 Params
-    "p1_nb_epochs": 2500,        
+    "p1_nb_epochs": 1500,        
     "p1_learning_rate": 1e-4 if USE_NLL_LOSS else 1e-4,
     "reverse_video_aug": True,
     "static_video_aug": True,
@@ -62,7 +62,8 @@ CONFIG = {
     "aux_loss_num_steps": 4,
 
     # Phase 2 Params
-    "p2_nb_epochs": 1500,
+    # "p2_nb_epochs": 1500,
+    "p2_nb_epochs": 1000,
     "p2_learning_rate": 1e-4,
 
     "print_every": 10,
@@ -95,7 +96,7 @@ key = jax.random.PRNGKey(CONFIG["seed"])
 torch.manual_seed(CONFIG["seed"])
 np.random.seed(CONFIG["seed"])
 
-def setup_run_dir(base_dir="experiments"):
+def setup_run_dir(base_dir="runs"):
     if TRAIN_PHASE_1 or TRAIN_PHASE_2:
         timestamp = datetime.datetime.now().strftime("%y%m%d-%H%M%S")
         run_path = Path(base_dir) / timestamp
@@ -139,7 +140,7 @@ def numpy_collate(batch):
 
 print("Loading Moving MNIST Dataset...")
 try:
-    data_path = './data' if (TRAIN_PHASE_1 or TRAIN_PHASE_2) else '../../data'
+    data_path = '../data' if (TRAIN_PHASE_1 or TRAIN_PHASE_2) else '../../data'
 
     # dataset = datasets.MovingMNIST(root=data_path, split=None, download=True)
     # train_loader = DataLoader(dataset, batch_size=CONFIG["batch_size"], shuffle=True, collate_fn=numpy_collate, drop_last=True)
@@ -180,7 +181,8 @@ try:
                                   batch_size=CONFIG["batch_size"], 
                                   shuffle=True, 
                                   collate_fn=numpy_collate, 
-                                  drop_last=False)
+                                  drop_last=False,
+                                  num_workers=8)
 
     sample_batch = next(iter(train_loader))
     B, nb_frames, H, W, C = sample_batch.shape
@@ -608,6 +610,66 @@ class CNNEncoder(eqx.Module):
         x = self.layers[-1](x)
         return x
 
+class CNNDecoder(eqx.Module):
+    linear: eqx.nn.Linear
+    layers: list
+    pre_flat_shape: tuple
+    out_channels: int = eqx.field(static=True)
+
+    def __init__(self, in_dim, out_channels, spatial_shape, key, hidden_width=64, depth=4):
+        H, W = spatial_shape
+        keys = jax.random.split(key, depth + 1)
+        
+        self.out_channels = out_channels * 2 if CONFIG.get("use_nll_loss", False) else out_channels
+        
+        # 1. Forward trace exactly like the encoder to get the spatial shapes
+        current_in = out_channels
+        current_out = hidden_width
+        dummy_x = jnp.zeros((current_in, H, W))
+        
+        channel_progression = []
+        for i in range(depth):
+            dummy_layer = eqx.nn.Conv2d(current_in, current_out, kernel_size=3, stride=2, padding=1, key=keys[0])
+            dummy_x = dummy_layer(dummy_x)
+            channel_progression.append(current_out)
+            current_in = current_out
+            current_out *= 2
+            
+        self.pre_flat_shape = dummy_x.shape
+        flat_dim = dummy_x.reshape(-1).shape[0]
+        
+        # 2. Build mapping from Latent -> Flattened Spatial
+        self.linear = eqx.nn.Linear(in_dim, flat_dim, key=keys[0])
+        
+        # 3. Build Transposed Convolutions
+        deconv_layers = []
+        c_in = self.pre_flat_shape[0]
+        
+        for i in range(depth):
+            # Reverse the channel sequence
+            c_out = channel_progression[depth - 2 - i] if i < depth - 1 else self.out_channels
+            deconv_layers.append(
+                eqx.nn.ConvTranspose2d(
+                    c_in, c_out, kernel_size=3, stride=2, padding=1, output_padding=1, key=keys[i+1]
+                )
+            )
+            c_in = c_out
+        
+        self.layers = deconv_layers
+
+    def __call__(self, x):
+        x = self.linear(x)
+        x = jax.nn.relu(x)
+        x = x.reshape(self.pre_flat_shape)
+        
+        for layer in self.layers[:-1]:
+            x = layer(x)
+            x = jax.nn.relu(x)
+            
+        # Final layer linear output (loss function or render_frame handles NLL / clipping)
+        x = self.layers[-1](x)
+        return x
+
 class ForwardDynamics(eqx.Module):
     mlp_A: Optional[eqx.nn.MLP]
     mlp_B: Optional[eqx.nn.MLP]
@@ -906,10 +968,9 @@ class LAM(eqx.Module):
 class WARP(eqx.Module):
     encoder: CNNEncoder
     forward_dyn: ForwardDynamics
-    theta_base: jax.Array
+    decoder: CNNDecoder  # Repurposed to hold the decoder PyTree!
     action_model: LAM
 
-    unravel_fn: callable = eqx.field(static=True)
     d_theta: int = eqx.field(static=True)
     lam_dim: int = eqx.field(static=True)
     frame_shape: tuple = eqx.field(static=True)
@@ -927,21 +988,18 @@ class WARP(eqx.Module):
         self.phase = phase
         H, W, C = frame_shape
 
-        coord_dim = 2 + 2 * 2 * num_freqs 
-        root_out_dim = C * 2 if CONFIG["use_nll_loss"] else C
-        add_time = 1 if CONFIG["use_time_in_root"] else 0
-        template_root = RootMLP(coord_dim+add_time, root_out_dim, root_width, root_depth, k_root)
-        
-        flat_params, self.unravel_fn = ravel_pytree(template_root)
-        self.d_theta = flat_params.shape[0]
-        self.theta_base = flat_params
+        # Standard bottleneck size
+        self.d_theta = 962 
+
+        # The CNNDecoder lives inside `decoder`. 
+        # This keeps the Phase 2 transplantation cells perfectly intact.
+        self.decoder = CNNDecoder(in_dim=self.d_theta, out_channels=C, spatial_shape=(H, W), key=k_root, hidden_width=64, depth=4)
 
         self.encoder = CNNEncoder(in_channels=C, out_dim=self.d_theta, spatial_shape=(H, W), key=k_enc, hidden_width=64, depth=4)
 
-        # Load weights only if Phase 1 AND pretrain_encoder is set.
         if CONFIG["pretrain_encoder"] and self.phase == 1:
             try:
-                self.encoder, self.theta_base = eqx.tree_deserialise_leaves("movingmnist_enc.eqx", (self.encoder, self.theta_base))
+                self.encoder, self.decoder = eqx.tree_deserialise_leaves("movingmnist_enc.eqx", (self.encoder, self.decoder))
             except:
                 print("Warning: movingmnist_enc.eqx not found. Starting from scratch.")
 
@@ -951,32 +1009,26 @@ class WARP(eqx.Module):
         num_actions = 4 if CONFIG["discrete_actions"] else None
         self.action_model = LAM(self.d_theta, lam_dim, mem_dim, max_len=20, num_heads=4, num_blocks=4, num_actions=num_actions, key=k_lam, phase=self.phase)
 
-    def render_pixels(self, theta, coords):
-        def render_pt(theta, coord):
-            root = self.unravel_fn(theta)
-            if CONFIG["use_time_in_root"]:
-                encoded_coord = jnp.concatenate([coord[:1], fourier_encode(coord[1:], self.num_freqs)], axis=-1)
-            else:
-                encoded_coord = fourier_encode(coord[1:], self.num_freqs)
-            out = root(encoded_coord)
-            if CONFIG["use_nll_loss"]:
-                mean, std = out[:C], out[C:]
-                std = jax.nn.softplus(std) + 1e-4
-                return jnp.concatenate([mean, std], axis=-1)
-            return out
-        return jax.vmap(render_pt, in_axes=(None, 0))(theta, coords)
-
-    def render_frame(self, theta_offset, coords_grid):
+    def render_frame(self, z_t, coords_grid):
+        # coords_grid is still accepted to prevent API breakage downstream, but we safely ignore it.
         H, W, C = self.frame_shape
-        flat_coords = coords_grid.reshape(-1, 3)
         
         if not CONFIG["pretrain_encoder"]:
-            theta = theta_offset + self.theta_base
+            decoder = self.decoder
         else:
-            theta = theta_offset + jax.lax.stop_gradient(self.theta_base)
+            # Safely stop gradients across the entire PyTree
+            decoder = jax.tree_util.tree_map(jax.lax.stop_gradient, self.decoder)
 
-        pred_flat = self.render_pixels(theta, flat_coords)
-        return pred_flat.reshape(H, W, -1)
+        out = decoder(z_t) # outputs (channels, H, W)
+        out = jnp.transpose(out, (1, 2, 0)) # standardise back to (H, W, channels)
+
+        # Handle NLL continuous distribution splitting if enabled
+        if CONFIG.get("use_nll_loss", False):
+            mean, std = out[..., :C], out[..., C:]
+            std = jax.nn.softplus(std) + 1e-4
+            return jnp.concatenate([mean, std], axis=-1)
+            
+        return out
 
     # -------------------------------------------------------------------------------------
     # PHASE 1 FORWARD: IDM Forcing (GCM is ignored/None)
@@ -1106,6 +1158,14 @@ if TRAIN_PHASE_1:
     
     print(f"Total Trainable Parameters in Phase 1 WARP: {count_trainable_params(model_p1)}")
     print(f"  - Number of paramters in dtheta (Root MLP): {model_p1.d_theta}", flush=True)
+    print(f" - In the encoder: {count_trainable_params(model_p1.encoder)}")
+    print(f" - In the decoder: {count_trainable_params(model_p1.decoder)}")
+    print(f" - In the forward dynamics: {count_trainable_params(model_p1.forward_dyn)}")
+    print(f" - In the IDM: {count_trainable_params(model_p1.action_model.idm)}")
+    if model_p1.action_model.gcm is not None:
+        print(f" - In the GCM: {count_trainable_params(model_p1.action_model.gcm)}")
+    if model_p1.action_model.action_embedding is not None:
+        print(f" - In the action embedding: {count_trainable_params(model_p1.action_model.action_embedding)}")
 
     optimizer_p1 = optax.chain(
         optax.adam(CONFIG["p1_learning_rate"]),
@@ -1256,7 +1316,7 @@ if TRAIN_PHASE_2:
     
     model_p2 = eqx.tree_at(lambda m: m.encoder, model_p2, dummy_p1.encoder)
     model_p2 = eqx.tree_at(lambda m: m.forward_dyn, model_p2, dummy_p1.forward_dyn)
-    model_p2 = eqx.tree_at(lambda m: m.theta_base, model_p2, dummy_p1.theta_base)
+    model_p2 = eqx.tree_at(lambda m: m.decoder, model_p2, dummy_p1.decoder)
     model_p2 = eqx.tree_at(lambda m: m.action_model.idm, model_p2, dummy_p1.action_model.idm)
 
     # 3. Partition parameters: Freeze everything except GCM
@@ -1405,7 +1465,7 @@ plot_videos(
 )
 
 #%% Gradually decreasing the context ratio
-real_id = 70
+real_id = 1
 final_actions, _, final_videos = evaluate(model_final, sample_batch[real_id:real_id+1], coords_grid, 21/20)
 test_seq_id = 0
 
@@ -1688,3 +1748,5 @@ plt.show()
 # %% Save nohup
 os.system(f"cp -r nohup.log {run_path}/nohup.log")
 
+
+# %%
