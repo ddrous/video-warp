@@ -62,7 +62,7 @@ BG_COLOR = "#FCFBFB"
 # 2.  DATA LOADING
 # ══════════════════════════════════════════════════════════════════════════════
 METHOD_SPECS = [
-    {'name': 'NaiveWM', 'file': 'arrays_naive_wm.npz', 'col_offset': 1, 'label': '(a) Naive WM'},
+    {'name': 'NaiveWM', 'file': 'arrays_naive_wm.npz', 'col_offset': 1, 'label': '(a) Standard WM'},
     {'name': 'LAPO',    'file': 'arrays_lapo.npz',     'col_offset': 5, 'label': '(b) LAPO'},
     {'name': 'Ours',    'file': 'arrays_vwarp.npz',    'col_offset': 9, 'label': '(c) Ours'},
 ]
@@ -193,8 +193,10 @@ for m in METHOD_SPECS:
     ax_hdr.axis('off')
     ax_hdr.text(0.5, 1.2, m['label'],   # was 1.48, now 0.9
                 ha='center', va='bottom',
-                fontsize=20, fontweight='bold' if name == 'Ours' else 88
+                # fontsize=20, fontweight='bold' if name == 'Ours' else 'normal'
+                fontsize=24, fontweight='normal'
                 , color="black",
+                # , color=lcolor,
                 transform=ax_hdr.transAxes, clip_on=False)
 
     # ── frames ────────────────────────────────────────────────────────────────
@@ -246,6 +248,7 @@ for m in METHOD_SPECS:
     ax_inj = fig.add_subplot(gs[FORK_IDX, c_off + 4])   # injection column
     # draw_frame(ax_inj, ref, RED_CMAP, BORDER_COL_CLEAN, BORDER_LW_CLEAN)
     draw_frame(ax_inj, ref, "grey", BORDER_COL_INJECT, BORDER_LW_INJECT, dashed=False)
+
     ax_inj.set_title('Alien\nFrame', fontsize=14,
                      color='#FF0000', fontweight=None
                      , pad=5)
@@ -286,7 +289,8 @@ for r, t in enumerate(t_values):
               ha='right', va='center',
               fontsize=18 if is_fork else 18,
               fontweight='bold' if is_fork else 'normal',
-              color='#FF0000' if is_fork else '#999999',   # red at fork
+            #   color='#FF0000' if is_fork else '#999999',   # red at fork
+              color='#999999',
               transform=ax_t.transAxes)
 
 # ══════════════════════════════════════════════════════════════════════════════
