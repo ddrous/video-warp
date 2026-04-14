@@ -46,6 +46,10 @@ runs/*/*
 !runs/260312-113749-PerfectMNIST*/main.py
 !runs/260316-202801-MiniGrid-Easy*/config.yaml
 
+baselines/runs/*
+!baselines/runs/*/
+baselines/runs/*/*
+!baselines/runs/260414-135108-Standard-WM-MNIST*/main.py
 
 baselines/genie-plots/*
 baselines/genie-claude-cont/artefacts/*
@@ -56,7 +60,7 @@ baselines/genie-gemini/artefacts/*
 baselines/genie-gemini/plots/*
 
 
-baselines/runs/*
+# baselines/runs/*
 
 
 *.npz
