@@ -62,6 +62,10 @@ baselines/genie-gemini/plots/*
 
 # baselines/runs/*
 
+# 260325-231413-MiniGrid-Continuous
+260325-231413-MiniGrid-LAPO
+260325-231413-MiniGrid-LikeLAPO
+260325-231413-MiniGrid-Large
 
 *.npz
 
