@@ -66,6 +66,8 @@ baselines/genie-gemini/plots/*
 260325-231413-MiniGrid-LAPO
 260325-231413-MiniGrid-LikeLAPO
 260325-231413-MiniGrid-Large
+260325-231413-MiniGrid-Cont-Longest
+260325-231413-MiniGrid-Cont-TeacherForced
 
 *.npz
 

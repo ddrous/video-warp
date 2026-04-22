@@ -37,7 +37,7 @@ def setup_run_dir(phase_name, config, train=True, base_dir="runs"):
         print(f"⚠️⚠️⚠️ WARNING: We recommend running {phase_name} from the run directory created by phase_1 ⚠️⚠️⚠️", flush=True)
 
     ## If phase 2 or 3, do nothing, return ./
-    if not train or phase_name in ["phase_2", "phase_3"]:
+    if not train or phase_name in ["phase_2", "phase_3", "phase_4"]:
     # if not train:
         # data_dir = Path(config["data_path"])
         # config["data_path"] = "../../" + str(data_dir.name)

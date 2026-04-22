@@ -39,8 +39,8 @@ phase_2:
   static_video_aug: true
   train_encoder: false
 phase_3:
-  batch_size: 16
-  gcm_type: LSTM
+  batch_size: 24
+  gcm_type: transformer
   learning_rate: 1.0e-05
   loss_type: L2
   lr_accum_size: 5
@@ -49,8 +49,37 @@ phase_3:
   lr_min_scale: 1.0
   lr_patience: 500
   lr_rtol: 0.0001
-  nb_epochs: 2000
+  nb_epochs: 6000
   num_actions: 200
+  print_every: 100
+phase_4:
+  batch_size: 16
+  learning_rate: 1.0e-05
+  loss_type: L2
+  lr_accum_size: 5
+  lr_cooldown: 100
+  lr_factor: 0.5
+  lr_min_scale: 1.0
+  lr_patience: 500
+  lr_rtol: 0.0001
+  nb_epochs: 10000
+  num_actions: 4
+  # action_embedding_dim: 128 ## Used to be this much
+  action_embedding_dim: 128
+  print_every: 10
+phase_5:
+  batch_size: 16
+  learning_rate: 1.0e-05
+  loss_type: L2
+  lr_accum_size: 5
+  lr_cooldown: 100
+  lr_factor: 0.5
+  lr_min_scale: 1.0
+  lr_patience: 500
+  lr_rtol: 0.0001
+  nb_epochs: 200
+  num_actions: 4
+  action_embedding_dim: 128
   print_every: 10
 root_activation: relu
 root_depth: 5
