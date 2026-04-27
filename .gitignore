@@ -72,3 +72,5 @@ baselines/genie-gemini/plots/*
 *.npz
 
 
+plots/long-horizon/*
+!plots/long-horizon/plot.py

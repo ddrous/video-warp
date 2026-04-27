@@ -1805,3 +1805,104 @@ os.system(f"cp -r nohup.log {run_path}/nohup.log")
 
 
 # %%
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#%%
+
+
+## We need to rewrite the inference_rollout
+@eqx.filter_jit
+def log_horizon_forecast(model, ref_video, coords_grid, context_ratio=2/20):
+    T = ref_video.shape[0]
+    init_frame = ref_video[0]
+    
+    z_init = model.encoder(jnp.transpose(init_frame, (2, 0, 1)))
+    m_init = model.action_model.reset_memory(T)
+    
+    @eqx.filter_checkpoint
+    def scan_step(carry, scan_inputs):
+        z_t, m_t, a_tm1 = carry
+        o_tp1, step_idx = scan_inputs
+
+        time_coord = jnp.array([(step_idx-1)/(T-1)], dtype=z_t.dtype)
+        coords_grid_t = jnp.concatenate([jnp.full_like(coords_grid[..., :1], time_coord), coords_grid], axis=-1)
+        pred_out = model.render_frame(z_t, coords_grid_t)
+
+        # Determine if we are still in the context window
+        is_context = (step_idx / T) < context_ratio
+
+        # Conditionally choose action: IDM (Teacher Forcing) vs GCM (Autoregressive)
+        a_t = jax.lax.cond(
+            is_context,
+            lambda: model.action_model.inverse_dynamics(
+                z_t, 
+                model.encoder(jnp.transpose(o_tp1, (2, 0, 1)))
+            ),
+            lambda: model.action_model.decode_memory(m_t, step_idx, z_t)
+        )
+
+        m_tp1 = model.action_model.encode_memory(m_t, step_idx, z_t, a_t)
+        z_tp1 = model.forward_dyn(z_t, a_t)
+
+        return (z_tp1, m_tp1, a_t), (a_t, z_t, pred_out)
+
+    # Pass the future ground truth frames into the scan so the IDM can use them
+    scan_inputs = (jnp.concatenate([ref_video[1:], jnp.zeros_like(ref_video[:1])], axis=0), jnp.arange(1, T+1))
+    a_init = jnp.zeros((model.lam_dim,), dtype=z_init.dtype)
+    _, (actions, pred_latents, pred_video) = jax.lax.scan(scan_step, (z_init, m_init, a_init), scan_inputs) # Note: pred_video shape is [T, H, W, C]
+    return pred_video
+
+# Select one sequence of 8 morphing into 9
+test_seq_id = 54
+total_length = 1000
+
+print(f"\nForecasting a long horizon rollout for test sequence ID: {test_seq_id} with total length {total_length} frames")
+
+input_video = sample_batch[test_seq_id]
+
+## Pad sequence to total_length with zeros (or repeat last frame)
+input_video = jnp.concatenate([input_video, jnp.zeros((total_length - input_video.shape[0], H, W, C))], axis=0)
+
+output_video = inference_rollout_morph(model_final, input_video, coords_grid, 2/20)
+
+plot_videos(
+    output_video[:50], 
+    show_titles=False,
+    show_labels=False,
+    plot_ref=False,
+    forecast_start=2,
+    forecast_gap=0.2,
+    hspace=0.02,
+    wspace=0.02,
+    # save_name=plots_path / f"vwarp_inference_long_ID{test_seq_id}_T{total_length}.png",
+    save_video=False,
+)
+
+## Save the numpy arrays for later use in the paper or website
+np.save(artefacts_path / f"naive_long_horizon_ID{test_seq_id}_T{total_length}.npy", output_video)
