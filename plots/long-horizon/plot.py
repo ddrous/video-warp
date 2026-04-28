@@ -546,7 +546,7 @@ def main():
 
     # Simulate running: python plot.py --seq 54 --metric jsd --table
     # args = parser.parse_args(args=['--seq', '57', '--metric', 'ssim', '--table'])
-    args = parser.parse_args(args=['--seq', '57', '--metric', 'wasserstein', '--table', '--latex'])
+    args = parser.parse_args(args=['--seq', '57', '--metric', 'ssim', '--table', '--latex'])
 
     global DATA_DIR
     if args.data_dir:
