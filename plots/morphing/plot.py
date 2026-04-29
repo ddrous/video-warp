@@ -64,7 +64,7 @@ BG_COLOR = "#FCFBFB"
 METHOD_SPECS = [
     {'name': 'NaiveWM', 'file': 'arrays_naive_wm.npz', 'col_offset': 1, 'label': '(a) Standard WM'},
     {'name': 'LAPO',    'file': 'arrays_lapo.npz',     'col_offset': 5, 'label': '(b) LAPO'},
-    {'name': 'Ours',    'file': 'arrays_vwarp.npz',    'col_offset': 9, 'label': '(c) Ours'},
+    {'name': 'Ours',    'file': 'arrays_vwarp.npz',    'col_offset': 9, 'label': '(c) NOVA (Ours)'},
 ]
 
 data_cache = {}
