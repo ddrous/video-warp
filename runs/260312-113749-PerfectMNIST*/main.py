@@ -1843,3 +1843,106 @@ plot_videos(
 
 ## Save the numpy arrays for later use in the paper or website
 np.save(artefacts_path / f"vwarp_long_horizon_ID{test_seq_id}_T{total_length}.npy", output_video)
+
+
+
+
+
+
+
+
+
+
+
+
+#%% Cell 7: Calculating Spatio-Temporal Metrics Across Test Set
+#%% Cell 7: Calculating Spatio-Temporal Metrics Across Test Set
+import time
+import numpy as np
+from tqdm import tqdm
+from skimage.metrics import structural_similarity as ssim
+
+print("\n=== Calculating Spatio-Temporal Error Metrics over Full Test Set ===")
+
+# --- Configuration & Setup ---
+num_context_frames = 10  # Standard T_in for Moving MNIST
+context_ratio_for_eval = float(num_context_frames) / 20.0
+
+mse_list = []
+mae_list = []
+psnr_list = []
+ssim_list = []
+
+print(f"Evaluating {len(testing_subset)} test sequences with T_context = {num_context_frames}")
+start_time = time.time()
+
+# Loop through the entire test dataloader
+for batch_idx, batch_videos in enumerate(tqdm(test_loader, desc="Testing set evaluation")):
+    
+    # 1. Run inference (generating the full 20 frames conditioned on context_ratio)
+    _, _, pred_videos = evaluate(model_final, batch_videos, coords_grid, context_ratio_for_eval)
+    
+    # Convert Jax arrays to Numpy
+    pred_np = np.array(pred_videos)
+    target_np = np.array(batch_videos)
+    
+    # Iterate over every video in the current batch
+    for b in range(target_np.shape[0]):
+        # Slice to keep ONLY the future predictions (T')
+        y_true_future = target_np[b, num_context_frames:]*1
+        y_pred_future = pred_np[b, num_context_frames:]*1
+        
+        # 2. OPENSTL METRIC REDUCTION (Evaluate on [0,1], SUM over space/channels)
+        squared_err = (y_true_future - y_pred_future) ** 2
+        abs_err = np.abs(y_true_future - y_pred_future)
+        
+        # Sum over H, W, C (axes 1, 2, 3 of the single sequence array) -> Shape: (Time,)
+        seq_mse_per_frame = np.sum(squared_err, axis=(1, 2, 3))
+        seq_mae_per_frame = np.sum(abs_err, axis=(1, 2, 3))
+        
+        # Mean over Time
+        mse_list.append(np.mean(seq_mse_per_frame))
+        mae_list.append(np.mean(seq_mae_per_frame))
+        
+        # 3. PSNR & SSIM (Calculated per-frame, then averaged)
+        seq_psnr = []
+        seq_ssim = []
+        
+        for t in range(y_true_future.shape[0]):
+            # SSIM
+            s = ssim(y_true_future[t], y_pred_future[t], data_range=1.0, channel_axis=-1)
+            seq_ssim.append(s)
+            
+            # PSNR (Requires per-pixel MSE, not the summed MSE)
+            mse_pixel = np.mean(squared_err[t])
+            mse_pixel = max(mse_pixel, 1e-10) # Avoid div by zero
+            p = 10 * np.log10(1.0 / mse_pixel)
+            seq_psnr.append(p)
+            
+        psnr_list.append(np.mean(seq_psnr))
+        ssim_list.append(np.mean(seq_ssim))
+
+# --- Aggregate and Print Results ---
+final_mse = np.mean(mse_list)
+final_mae = np.mean(mae_list)
+final_rmse = np.sqrt(final_mse) # RMSE is typically the sqrt of the final aggregated MSE
+final_psnr = np.mean(psnr_list)
+final_ssim = np.mean(ssim_list)
+
+print("\n" + "-"*54)
+print("  Test Set Results (Averaged across all sequences)")
+print(f"  Context Frames: {num_context_frames}")
+print("-" * 54)
+print(f"  Mean Squared Error (MSE):          {final_mse:.4f}")
+print(f"  Mean Absolute Error (MAE):         {final_mae:.4f}")
+print(f"  Root Mean Squared Error (RMSE):    {final_rmse:.4f}")
+print(f"  Peak Signal-to-Noise Ratio (PSNR): {final_psnr:.4f}")
+print(f"  Structural Similarity (SSIM):      {final_ssim:.4f}")
+print("-" * 54)
+print(f"Evaluation took {time.strftime('%H:%M:%S', time.gmtime(time.time() - start_time))}")
+
+
+
+
+
+

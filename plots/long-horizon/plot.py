@@ -46,7 +46,7 @@ LABEL_COLS = {
 DISPLAY_NAMES = {
     "NaiveWM": "Standard WM",
     "LAPO":    "LAPO",
-    "Ours":    "NOVA (Ours)",
+    "Ours":    "NOVA (ours)",
 }
 FILE_KEYS = {
     "NaiveWM": "standard",
@@ -413,6 +413,7 @@ def compute_table(seq_ids=(54, 57)) -> None:
                 continue
             combined = np.concatenate(all_scores)
             mu, lo, hi = combined.mean(), combined.min(), combined.max()
+            # mu, lo, hi = np.median(combined), combined.min(), combined.max()
 
             metric_col = mdisplay if first_method else ""
             fmt = ".4f"
@@ -546,7 +547,7 @@ def main():
 
     # Simulate running: python plot.py --seq 54 --metric jsd --table
     # args = parser.parse_args(args=['--seq', '57', '--metric', 'ssim', '--table'])
-    args = parser.parse_args(args=['--seq', '57', '--metric', 'ssim', '--table', '--latex'])
+    args = parser.parse_args(args=['--seq', '57', '--metric', 'bhattacharyya', '--table', '--latex'])
 
     global DATA_DIR
     if args.data_dir:
