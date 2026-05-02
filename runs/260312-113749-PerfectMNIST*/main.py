@@ -1946,3 +1946,14 @@ print(f"Evaluation took {time.strftime('%H:%M:%S', time.gmtime(time.time() - sta
 
 
 
+
+#%%
+
+print(f"Total Trainable Parameters in the FDM: {count_trainable_params(model_final.forward_dyn)}")
+print(f"Total Trainable Parameters in the Encoder: {count_trainable_params(model_final.encoder)}")
+print(f"Total Trainable Parameters in the IDM: {count_trainable_params(model_final.action_model.idm)}")
+print(f"Total Trainable Parameters in the GCM: {count_trainable_params(model_final.action_model.gcm)}")
+
+
+## Total in the whole model
+print(f"Total Trainable Parameters in the entire WARP model: {count_trainable_params(model_final)}")
